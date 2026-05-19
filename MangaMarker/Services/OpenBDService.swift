@@ -58,19 +58,6 @@ final class OpenBDService {
         }
     }
 
-    /// OpenBDにはタイトル検索エンドポイントが無いため、coverage で全ISBNを取得 → 個別フィルタは現実的でないので、
-    /// ここでは「タイトルを含むISBN候補をユーザー入力から推測」できないため、シリーズ既知のISBNで補完するための雛形を残す。
-    /// 実運用ではGoogle Books APIや楽天ブックスAPIを併用する想定（将来拡張）。
-    func searchByTitle(_ query: String, isbnCandidates: [String] = []) async throws -> [OpenBDParsedBook] {
-        guard !isbnCandidates.isEmpty else { return [] }
-        let books = try await fetch(isbns: isbnCandidates)
-        let lowered = query.lowercased()
-        return books.filter {
-            $0.title.lowercased().contains(lowered)
-            || ($0.series?.lowercased().contains(lowered) ?? false)
-        }
-    }
-
     // MARK: - Parsing
 
     private func parse(book: OpenBDBook) -> OpenBDParsedBook? {
@@ -81,8 +68,9 @@ final class OpenBDService {
         let publisher = summary.publisher?.isEmpty == false ? summary.publisher : nil
         let author = summary.author ?? ""
         let cover = summary.cover?.isEmpty == false ? summary.cover : nil
-        let publishedAt = parseDate(summary.pubdate)
-        let volume = extractVolumeNumber(from: summary.volume) ?? extractVolumeNumber(from: title)
+        let publishedAt = BookMetadataParser.parseOpenBDDate(summary.pubdate)
+        let volume = BookMetadataParser.extractVolumeNumber(from: summary.volume)
+            ?? BookMetadataParser.extractVolumeNumber(from: title)
 
         return OpenBDParsedBook(
             isbn: isbn,
@@ -96,38 +84,4 @@ final class OpenBDService {
         )
     }
 
-    private func parseDate(_ raw: String?) -> Date? {
-        guard let raw, !raw.isEmpty else { return nil }
-        let formatters = ["yyyyMMdd", "yyyy-MM-dd", "yyyy/MM/dd"].map { fmt -> DateFormatter in
-            let f = DateFormatter()
-            f.locale = Locale(identifier: "en_US_POSIX")
-            f.timeZone = TimeZone(identifier: "Asia/Tokyo")
-            f.dateFormat = fmt
-            return f
-        }
-        for f in formatters {
-            if let d = f.date(from: raw) { return d }
-        }
-        return nil
-    }
-
-    private func extractVolumeNumber(from text: String?) -> Int? {
-        guard let text else { return nil }
-        let patterns = [
-            "(?:第)?(\\d+)\\s*巻",
-            "vol\\.?\\s*(\\d+)",
-            "\\((\\d+)\\)",
-            "\\b(\\d+)\\b"
-        ]
-        for pattern in patterns {
-            if let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]),
-               let match = regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
-               match.numberOfRanges > 1,
-               let range = Range(match.range(at: 1), in: text),
-               let n = Int(text[range]) {
-                return n
-            }
-        }
-        return nil
-    }
 }

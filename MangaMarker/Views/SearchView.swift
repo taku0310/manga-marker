@@ -6,27 +6,20 @@ struct SearchView: View {
     @State private var navigateManga: Manga?
 
     var body: some View {
-        Group {
-            if viewModel.isSearching {
-                ProgressView("検索中…")
-            } else if viewModel.results.isEmpty {
-                ContentUnavailableView {
-                    Label("漫画を検索", systemImage: "magnifyingglass")
-                } description: {
-                    Text("ISBN(10桁または13桁)を入力してください。\nタイトル検索は将来対応します。")
-                }
-            } else {
-                List(viewModel.results) { book in
-                    SearchResultRow(book: book) {
-                        if let manga = viewModel.addToLibrary(book) {
-                            navigateManga = manga
-                        }
-                    }
+        VStack(spacing: 0) {
+            Picker("検索モード", selection: $viewModel.mode) {
+                ForEach(SearchViewModel.SearchMode.allCases) { mode in
+                    Text(mode.rawValue).tag(mode)
                 }
             }
+            .pickerStyle(.segmented)
+            .padding(.horizontal)
+            .padding(.top, 8)
+
+            content
         }
         .navigationTitle("検索")
-        .searchable(text: $viewModel.query, prompt: "ISBNを入力")
+        .searchable(text: $viewModel.query, prompt: searchPrompt)
         .onSubmit(of: .search) {
             Task { await viewModel.search() }
         }
@@ -45,6 +38,39 @@ struct SearchView: View {
             )
         }
     }
+
+    private var searchPrompt: String {
+        switch viewModel.mode {
+        case .auto:  return "タイトル または ISBN を入力"
+        case .isbn:  return "ISBN(10桁 または 13桁)"
+        case .title: return "タイトル / 著者名"
+        }
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        if viewModel.isSearching {
+            Spacer()
+            ProgressView("検索中…")
+            Spacer()
+        } else if viewModel.results.isEmpty {
+            Spacer()
+            ContentUnavailableView {
+                Label("漫画を検索", systemImage: "magnifyingglass")
+            } description: {
+                Text("タイトル・著者名・ISBN いずれでも検索できます。\nバーコードを撮影するなら「スキャン」タブが便利です。")
+            }
+            Spacer()
+        } else {
+            List(viewModel.results) { book in
+                SearchResultRow(book: book) {
+                    if let manga = viewModel.addToLibrary(book) {
+                        navigateManga = manga
+                    }
+                }
+            }
+        }
+    }
 }
 
 private struct SearchResultRow: View {
@@ -56,9 +82,25 @@ private struct SearchResultRow: View {
             CoverImageView(urlString: book.coverImageURL, width: 56, height: 80)
             VStack(alignment: .leading, spacing: 4) {
                 Text(book.title).font(.headline).lineLimit(2)
-                if let series = book.series { Text(series).font(.caption).foregroundStyle(.secondary) }
-                Text(book.author).font(.subheadline).foregroundStyle(.secondary)
-                if let v = book.volumeNumber { Text("第\(v)巻").font(.caption) }
+                if let series = book.series, series != book.title {
+                    Text(series).font(.caption).foregroundStyle(.secondary)
+                }
+                Text(book.author).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
+                HStack(spacing: 6) {
+                    if let v = book.volumeNumber {
+                        Label("第\(v)巻", systemImage: "number")
+                            .font(.caption2)
+                            .labelStyle(.titleOnly)
+                            .padding(.horizontal, 6).padding(.vertical, 2)
+                            .background(Color.accentColor.opacity(0.15), in: Capsule())
+                            .foregroundStyle(Color.accentColor)
+                    }
+                    if let date = book.publishedAt {
+                        Text(date, format: .dateTime.year().month())
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
             }
             Spacer()
             Button(action: onAdd) {
@@ -66,6 +108,7 @@ private struct SearchResultRow: View {
             }
             .buttonStyle(.plain)
             .foregroundStyle(Color.accentColor)
+            .accessibilityLabel("ライブラリに追加")
         }
     }
 }

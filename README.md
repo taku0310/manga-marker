@@ -120,14 +120,18 @@ MangaMarker/
 │   └── Info.plist
 ├── Models/
 │   ├── Manga.swift               # Manga / Volume / MangaWithProgress
-│   └── OpenBDResponse.swift      # OpenBD JSON → OpenBDParsedBook
+│   ├── OpenBDResponse.swift      # OpenBD JSON → OpenBDParsedBook
+│   └── RakutenResponse.swift     # 楽天ブックス JSON → OpenBDParsedBook
 ├── Database/
 │   ├── DatabaseManager.swift     # SQLite open / migrate / queue
 │   └── MangaRepository.swift     # 全 CRUD
 ├── Services/
-│   ├── OpenBDService.swift       # ISBN取得 / バルク取得 / パース
+│   ├── AppConfig.swift           # Info.plist 由来の設定値 (RakutenAppId)
+│   ├── BookMetadataParser.swift  # 巻数抽出・日付パース・タイトル正規化 (共有)
+│   ├── OpenBDService.swift       # ISBN 取得 / バルク取得
+│   ├── RakutenBooksService.swift # タイトル検索 / シリーズ検索
 │   ├── NotificationService.swift # UNUserNotificationCenter
-│   └── NewReleaseChecker.swift   # 新刊チェックロジック
+│   └── NewReleaseChecker.swift   # 新刊チェック (楽天 + OpenBD 二段構え)
 ├── ViewModels/
 │   ├── MangaListViewModel.swift
 │   ├── MangaDetailViewModel.swift
@@ -154,23 +158,55 @@ UI のキーポイント:
 
 ---
 
-## 4. API 通信コード (OpenBD)
+## 4. API 通信コード
 
-`Services/OpenBDService.swift` 参照。
+### 4-1. OpenBD (`Services/OpenBDService.swift`)
 
 - エンドポイント: `https://api.openbd.jp/v1/get?isbn=...`
 - バルク取得対応 (カンマ区切り) → `fetch(isbns:)`。
 - レスポンスは `[OpenBDBook?]` 形式 (null を含む配列) を `compactMap` でクレンジング。
-- `summary.volume` または `title` から正規表現で巻数を抽出 (`(?:第)?(\d+)\s*巻` 等)。
-- `pubdate` (`yyyyMMdd` 等) を JST で `Date` へ変換。
+- 巻数・発売日のパースは `BookMetadataParser` に集約。
 - エラーは `OpenBDError` 列挙体で表現し、`LocalizedError` で UI 表示用に整形。
-
-### 呼び出し例
 
 ```swift
 let book = try await openBDService.fetch(isbn: "9784088831824")
-print(book.title, book.volumeNumber, book.coverImageURL)
 ```
+
+### 4-2. 楽天ブックス (`Services/RakutenBooksService.swift`)
+
+OpenBD はタイトル検索ができないため、**楽天ブックス書籍検索 API** をタイトル検索とシリーズ検索に併用。
+
+- エンドポイント: `https://app.rakuten.co.jp/services/api/BooksBook/Search/20170404`
+- `applicationId` は **`Info.plist` の `RakutenAppId` キー** から `AppConfig` 経由で読み取る。
+- マンガジャンル (`booksGenreId=001001`) に限定 + 発売日降順 (`sort=-releaseDate`) で取得。
+- レスポンスは `RakutenSearchResponse` で受け、`RakutenItem.toParsedBook` で `OpenBDParsedBook` に正規化 (画像 URL は `https` に自動置換)。
+- 公開メソッド:
+  - `searchByTitle(_:)`: タイトル/著者/キーワード検索 (SearchView 用)
+  - `searchSeries(_:)`: シリーズ名検索 → クライアント側で seriesName 一致フィルタ (NewReleaseChecker 用)
+
+```swift
+let books = try await rakutenService.searchByTitle("鬼滅の刃")
+let candidates = try await rakutenService.searchSeries("ワンピース")
+```
+
+**applicationId 取得**: [楽天ウェブサービス](https://webservice.rakuten.co.jp/) でアプリ登録 (無料) → Info.plist の `RakutenAppId` を発行された ID に置換。未設定でもアプリは起動でき、検索時にエラーメッセージで案内します。
+
+### 4-3. 検索ロジック (SearchViewModel)
+
+- **自動モード** (デフォルト): 入力が「数字+ハイフン+空白のみ」かつ桁数が 10 または 13 のときは ISBN → OpenBD 検索。それ以外は楽天タイトル検索。
+- **ISBN モード**: 強制的に OpenBD 検索 (失敗時は楽天にフォールバック)。
+- **タイトルモード**: 強制的に楽天タイトル検索。
+
+### 4-4. 新刊検出 (`Services/NewReleaseChecker.swift`)
+
+二段構えで精度を確保:
+
+1. **楽天シリーズ検索** (主): `searchSeries(manga.title)` → 同一シリーズ判定 → 未登録 ISBN かつ最新巻より新しい発売日のみ採用。
+2. **OpenBD ISBN 近傍探索** (フォールバック): 楽天 API が使えない / ヒットなしの場合、最新巻 ISBN の隣接 8 件を OpenBD でバッチ取得。
+
+採用時は `volumes` テーブルへ自動登録 + `UNCalendarNotificationTrigger` でローカル通知を予約 + `notifications_log` で冪等性を担保。
+
+同一シリーズ判定は `BookMetadataParser.normalizeTitle` (空白除去 + 小文字化 + `・` 除去) を用いた双方向部分一致。既知巻数と重複するもの (廉価版・愛蔵版など) は除外する。
 
 ---
 
@@ -195,11 +231,8 @@ print(book.title, book.volumeNumber, book.coverImageURL)
 
 ## 6. 将来拡張
 
-- **タイトル検索** : OpenBD はタイトル検索 API がないため、Google Books API
-  もしくは楽天ブックス書籍検索 API を `OpenBDService` と並列に注入する。
-  `BookSearchService` プロトコルを切って抽象化 (SOLID)。
-- **新刊検出の精度向上** : 出版社別シリーズコード (JAN 内部の出版社識別) を辞書化、
-  あるいは Amazon PA-API・楽天ブックス API による「シリーズ ID → 全巻リスト」取得に切替。
+- ~~**タイトル検索**~~ → **実装済** (楽天ブックス書籍検索 API)
+- ~~**新刊検出の精度向上**~~ → **実装済** (楽天シリーズ検索 + OpenBD 近傍 ISBN フォールバック)
 - **iCloud / CloudKit 同期** : `manga` `volumes` を `CKRecord` でミラーし、
   複数端末・データ移行に対応。SQLite はキャッシュレイヤー化。
 - **WidgetKit / Live Activities** : ホーム画面に「次に読む」カードを常時表示。
@@ -232,12 +265,25 @@ open MangaMarker.xcodeproj
 5. Deployment Target を **iOS 17.0** 以上に。
 6. **実機** でカメラ機能を確認 (シミュレーターはバーコードスキャン非対応)。
 
+### 楽天 API のセットアップ
+
+タイトル検索と高精度な新刊検出を有効化するには、楽天ウェブサービスの applicationId が必要です。
+
+1. https://webservice.rakuten.co.jp/ で会員登録 (Rakuten ID) → 「アプリ ID 発行」。
+2. Xcode で `MangaMarker/App/Info.plist` を開き、`RakutenAppId` の値を発行された ID に置き換え。
+3. Build & Run。
+
+> 未設定でもアプリは起動できますが、タイトル検索時にエラーメッセージで案内され、新刊検出は ISBN 近傍フォールバックのみで動作します。
+
 ### 動作確認
 
-- 検索タブで `9784088831824` (例: 集英社のあるコミックス) を入力 → 検索 → 追加。
+- 検索タブで「タイトル」モードに切り替え `鬼滅の刃` などを入力 → 楽天 API でシリーズの全巻が並ぶ。
+- 検索タブで「ISBN」モードに切り替え `9784088831824` を入力 → 1 件取得。
+- 「自動」モードでは入力を見て自動で振り分け。
 - スキャンタブで書籍裏表紙のバーコードをかざす → 自動追加。
 - ライブラリタブで進捗バーと「次に読む」バッジが表示される。
 - 詳細画面で巻をタップして読了マーク、または左スワイプで「ここまで読了」。
+- アプリ起動 + ライブラリ画面で Pull to Refresh → 楽天シリーズ検索による新刊チェックが走り、新刊が見つかれば自動で巻が追加され通知が予約される。
 
 ---
 

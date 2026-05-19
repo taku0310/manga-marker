@@ -1,18 +1,26 @@
 import Foundation
 
-/// 登録済みシリーズの「最新巻+1」をOpenBDから推定する仕組み。
-/// 現状OpenBDにはシリーズ検索が無いため、最新巻のISBNを基点に
-///   ・JANに含まれるシリーズコードからの推測（出版社により規則性あり）
-///   ・将来的にGoogle Books APIや楽天ブックスAPIで補完
-/// をする想定の雛形。ここでは登録済みISBN周辺を試行する単純実装。
+/// 登録済みシリーズの新刊を検出する。
+///
+/// 戦略:
+/// 1) 楽天ブックス API でシリーズ名検索 (推奨) → 同一シリーズと判定できた書籍を比較。
+/// 2) 楽天 API が使えない / 該当ヒットがない場合のフォールバックとして、
+///    OpenBD で「最新巻 ISBN の近傍」を試行 (旧実装)。
+/// いずれの経路でも、最終的に「未登録 ISBN かつ 最新登録巻より新しい発売日」のみを採用し、
+/// `notifications_log` で冪等性を担保する。
 final class NewReleaseChecker {
     private let repository: MangaRepository
     private let openBDService: OpenBDService
+    private let rakutenService: RakutenBooksService
     private let notificationService: NotificationService
 
-    init(repository: MangaRepository, openBDService: OpenBDService, notificationService: NotificationService) {
+    init(repository: MangaRepository,
+         openBDService: OpenBDService,
+         rakutenService: RakutenBooksService,
+         notificationService: NotificationService) {
         self.repository = repository
         self.openBDService = openBDService
+        self.rakutenService = rakutenService
         self.notificationService = notificationService
     }
 
@@ -25,46 +33,90 @@ final class NewReleaseChecker {
 
     func check(manga: Manga) async {
         let volumes = repository.fetchVolumes(mangaId: manga.id)
-        guard let latest = volumes.last, let isbn = latest.isbn else { return }
 
-        // ISBN-13は末尾1桁がチェックディジット。下位を変えて隣接候補を生成。
-        let candidates = neighborISBNs(of: isbn, depth: 8).filter { $0 != isbn }
-        guard !candidates.isEmpty else { return }
-
+        // Strategy 1: 楽天シリーズ検索
         do {
-            let books = try await openBDService.fetch(isbns: candidates)
-            for book in books {
-                guard let pubDate = book.publishedAt, pubDate > latest.publishedAt ?? .distantPast else { continue }
-                guard !repository.wasNotified(isbn: book.isbn) else { continue }
-                guard !repository.volumeExists(isbn: book.isbn) else { continue }
-
-                let isSameSeries = (book.series ?? book.title).contains(manga.title)
-                    || manga.title.contains(book.series ?? book.title)
-                guard isSameSeries else { continue }
-
-                let nextVolume = (book.volumeNumber ?? (latest.volumeNumber + 1))
-                repository.upsertVolume(
-                    mangaId: manga.id,
-                    volumeNumber: nextVolume,
-                    isbn: book.isbn,
-                    title: book.title,
-                    coverImageURL: book.coverImageURL,
-                    publishedAt: pubDate
-                )
-                await notificationService.scheduleNewReleaseNotification(
-                    mangaTitle: manga.title,
-                    volumeNumber: nextVolume,
-                    isbn: book.isbn,
-                    releaseDate: pubDate
-                )
-                repository.markNotified(isbn: book.isbn)
+            let books = try await rakutenService.searchSeries(manga.title)
+            if !books.isEmpty {
+                await process(candidates: books, manga: manga, volumes: volumes)
+                return
             }
+        } catch RakutenError.missingAppId {
+            // appId 未設定なら静かにフォールバック
         } catch {
-            print("New release check failed for \(manga.title): \(error)")
+            print("Rakuten series search failed for \(manga.title): \(error)")
+        }
+
+        // Strategy 2: OpenBD ISBN 近傍
+        await fallbackByISBNNeighborhood(manga: manga, volumes: volumes)
+    }
+
+    // MARK: - Strategies
+
+    private func process(candidates books: [OpenBDParsedBook], manga: Manga, volumes: [Volume]) async {
+        let latestPubDate = volumes.compactMap(\.publishedAt).max() ?? .distantPast
+        let latestVolumeNumber = volumes.map(\.volumeNumber).max() ?? 0
+        let knownISBNs = Set(volumes.compactMap(\.isbn))
+        let knownVolumeNumbers = Set(volumes.map(\.volumeNumber))
+
+        for book in books {
+            guard isSameSeries(book: book, manga: manga) else { continue }
+            guard !knownISBNs.contains(book.isbn) else { continue }
+            guard !repository.wasNotified(isbn: book.isbn) else { continue }
+
+            // 発売日が最新巻より新しい必要がある (発売日不明の場合は採用しない)
+            guard let pubDate = book.publishedAt, pubDate > latestPubDate else { continue }
+
+            // 巻数が既知の番号と被るなら、同じ巻の別装版 (廉価版・愛蔵版等) の可能性が高いのでスキップ
+            let nextVolume: Int
+            if let bookVolume = book.volumeNumber {
+                if knownVolumeNumbers.contains(bookVolume) { continue }
+                nextVolume = bookVolume
+            } else {
+                nextVolume = latestVolumeNumber + 1
+            }
+
+            repository.upsertVolume(
+                mangaId: manga.id,
+                volumeNumber: nextVolume,
+                isbn: book.isbn,
+                title: book.title,
+                coverImageURL: book.coverImageURL,
+                publishedAt: pubDate
+            )
+            await notificationService.scheduleNewReleaseNotification(
+                mangaTitle: manga.title,
+                volumeNumber: nextVolume,
+                isbn: book.isbn,
+                releaseDate: pubDate
+            )
+            repository.markNotified(isbn: book.isbn)
         }
     }
 
-    /// ISBN-13のチェックディジットを再計算しつつ、下位を増分させた候補を生成する。
+    private func fallbackByISBNNeighborhood(manga: Manga, volumes: [Volume]) async {
+        guard let latest = volumes.last, let isbn = latest.isbn else { return }
+        let candidates = neighborISBNs(of: isbn, depth: 8).filter { $0 != isbn }
+        guard !candidates.isEmpty else { return }
+        do {
+            let books = try await openBDService.fetch(isbns: candidates)
+            await process(candidates: books, manga: manga, volumes: volumes)
+        } catch {
+            print("OpenBD neighborhood check failed for \(manga.title): \(error)")
+        }
+    }
+
+    // MARK: - Helpers
+
+    private func isSameSeries(book: OpenBDParsedBook, manga: Manga) -> Bool {
+        let target = BookMetadataParser.normalizeTitle(manga.title)
+        let candidates = [book.series, book.title].compactMap { $0 }
+        return candidates.contains { candidate in
+            let normalized = BookMetadataParser.normalizeTitle(candidate)
+            return normalized.contains(target) || target.contains(normalized)
+        }
+    }
+
     private func neighborISBNs(of isbn: String, depth: Int) -> [String] {
         let digits = isbn.filter(\.isNumber)
         guard digits.count == 13 else { return [] }

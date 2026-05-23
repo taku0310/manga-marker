@@ -292,6 +292,17 @@ plutil -p ~/Library/Developer/Xcode/DerivedData/MangaMarker-*/Build/Products/Deb
 | プレースホルダのまま | `RakutenAppId` の値が `YOUR_RAKUTEN_APP_ID` のまま | 実 ID に置換 (空文字や `YOUR_RAKUTEN_APP_ID` は `AppConfig` で nil 扱い) |
 | Clean Build が必要 | DerivedData に古い Info.plist がキャッシュ | Xcode → Product → Clean Build Folder (`⇧⌘K`) して再ビルド |
 
+### トラブルシューティング: HTTP 400 (wrong_parameter) が出る
+
+`RakutenBooksService` で 400 が返るときは、レスポンスボディに楽天 API の `error_description` が含まれます。本リポジトリでは:
+
+- DEBUG ビルド時にコンソールへ `[Rakuten] GET <URL>` と `[Rakuten] HTTP 400 body: <JSON>` を出力
+- UI 上は `HTTPエラー 400: <error_description>` の形でアラート表示
+
+過去に確認された原因例:
+
+- `booksGenreId=001001` を渡していた → 楽天ブックスでは `001001` は「文芸書」で、API バージョンによってはマンガタイトル検索と組み合わせると `wrong_parameter` を返す。 → **本リポジトリでは genre 絞り込みを廃止し、結果はクライアント側で発売日降順にソートする方式に変更済**。
+
 ### 動作確認
 
 - 検索タブで「タイトル」モードに切り替え `鬼滅の刃` などを入力 → 楽天 API でシリーズの全巻が並ぶ。

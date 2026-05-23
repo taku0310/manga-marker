@@ -5,20 +5,47 @@ enum RakutenError: LocalizedError {
     case invalidURL
     case notFound
     case rateLimited
-    case http(Int)
+    case http(Int, String?)
     case network(Error)
     case decoding(Error)
 
     var errorDescription: String? {
         switch self {
-        case .missingAppId: return "楽天 API の Application ID が設定されていません。Info.plist の RakutenAppId を設定してください。"
-        case .invalidURL: return "URLが不正です"
-        case .notFound: return "該当する書籍が見つかりませんでした"
-        case .rateLimited: return "アクセス制限に達しました。しばらく待ってから再試行してください。"
-        case .http(let code): return "HTTPエラー: \(code)"
-        case .network(let e): return "通信エラー: \(e.localizedDescription)"
-        case .decoding(let e): return "データ解析エラー: \(e.localizedDescription)"
+        case .missingAppId:
+            return "楽天 API の Application ID が設定されていません。Info.plist の RakutenAppId を設定してください。"
+        case .invalidURL:
+            return "URLが不正です"
+        case .notFound:
+            return "該当する書籍が見つかりませんでした"
+        case .rateLimited:
+            return "アクセス制限に達しました。しばらく待ってから再試行してください。"
+        case .http(let code, let detail):
+            if let detail, !detail.isEmpty {
+                return "HTTPエラー \(code): \(detail)"
+            }
+            return "HTTPエラー: \(code)"
+        case .network(let e):
+            return "通信エラー: \(e.localizedDescription)"
+        case .decoding(let e):
+            return "データ解析エラー: \(e.localizedDescription)"
         }
+    }
+}
+
+/// 楽天ブックス API のエラーレスポンス。
+/// 例: `{"error":"wrong_parameter","error_description":"param missing. (booksGenreId)"}`
+private struct RakutenAPIErrorBody: Decodable {
+    let error: String?
+    let errorDescription: String?
+
+    enum CodingKeys: String, CodingKey {
+        case error
+        case errorDescription = "error_description"
+    }
+
+    var displayMessage: String? {
+        let parts = [error, errorDescription].compactMap { $0?.isEmpty == false ? $0 : nil }
+        return parts.isEmpty ? nil : parts.joined(separator: " - ")
     }
 }
 
@@ -29,33 +56,31 @@ final class RakutenBooksService {
     private let baseURL = URL(string: "https://app.rakuten.co.jp/services/api/BooksBook/Search/20170404")!
     private let appId: String?
 
-    /// 少年・青年マンガ (001001008) / 少女・女性マンガ (001001009) / その他 (001001010)
-    private let mangaGenreIds = ["001001008", "001001009", "001001010"]
-
     init(session: URLSession = .shared, appId: String? = AppConfig.rakutenAppId) {
         self.session = session
         self.appId = appId
     }
 
     /// タイトル/著者/キーワードでのフリーテキスト検索。
-    /// マンガジャンルで絞り込み、発売日降順で返す。
+    /// ジャンル絞り込みは行わず (API バージョン依存で 400 を返すため)、
+    /// 並べ替えはクライアント側で発売日降順に行う。
     func searchByTitle(_ title: String, hits: Int = 30, page: Int = 1) async throws -> [OpenBDParsedBook] {
         guard let appId else { throw RakutenError.missingAppId }
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return [] }
 
-        var queryItems: [URLQueryItem] = [
+        let queryItems: [URLQueryItem] = [
             URLQueryItem(name: "applicationId", value: appId),
             URLQueryItem(name: "title", value: trimmed),
             URLQueryItem(name: "hits", value: String(min(max(hits, 1), 30))),
             URLQueryItem(name: "page", value: String(max(page, 1))),
-            URLQueryItem(name: "sort", value: "-releaseDate"),
             URLQueryItem(name: "formatVersion", value: "2")
         ]
-        // マンガジャンルのいずれか (OR 検索は API 単発では難しいので、最広義のマンガ親ジャンルを指定)
-        queryItems.append(URLQueryItem(name: "booksGenreId", value: "001001"))
 
-        return try await request(queryItems: queryItems)
+        let books = try await request(queryItems: queryItems)
+        return books.sorted {
+            ($0.publishedAt ?? .distantPast) > ($1.publishedAt ?? .distantPast)
+        }
     }
 
     /// シリーズ名から新刊候補を取得する。新刊検出専用。
@@ -82,14 +107,28 @@ final class RakutenBooksService {
         components.queryItems = queryItems
         guard let url = components.url else { throw RakutenError.invalidURL }
 
+        #if DEBUG
+        print("[Rakuten] GET \(url.absoluteString)")
+        #endif
+
         do {
             let (data, response) = try await session.data(from: url)
             if let http = response as? HTTPURLResponse {
                 switch http.statusCode {
-                case 200..<300: break
-                case 429: throw RakutenError.rateLimited
-                case 404: throw RakutenError.notFound
-                default: throw RakutenError.http(http.statusCode)
+                case 200..<300:
+                    break
+                case 429:
+                    throw RakutenError.rateLimited
+                case 404:
+                    throw RakutenError.notFound
+                default:
+                    let detail = (try? JSONDecoder().decode(RakutenAPIErrorBody.self, from: data))?.displayMessage
+                    #if DEBUG
+                    if let body = String(data: data, encoding: .utf8) {
+                        print("[Rakuten] HTTP \(http.statusCode) body: \(body)")
+                    }
+                    #endif
+                    throw RakutenError.http(http.statusCode, detail)
                 }
             }
             let decoded = try JSONDecoder().decode(RakutenSearchResponse.self, from: data)

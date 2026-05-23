@@ -21,6 +21,9 @@ enum RakutenError: LocalizedError {
             return "アクセス制限に達しました。しばらく待ってから再試行してください。"
         case .http(let code, let detail):
             if let detail, !detail.isEmpty {
+                if detail.localizedCaseInsensitiveContains("applicationid") {
+                    return "applicationId が無効です。Info.plist の RakutenAppId に楽天ウェブサービスで発行された applicationId (数字のみ・通常 19 桁) を設定してください。UUID 形式のものは affiliateId なので API 認証には使えません。"
+                }
                 return "HTTPエラー \(code): \(detail)"
             }
             return "HTTPエラー: \(code)"

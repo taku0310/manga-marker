@@ -270,10 +270,19 @@ open MangaMarker.xcodeproj
 タイトル検索と高精度な新刊検出を有効化するには、楽天ウェブサービスの applicationId が必要です。
 
 1. https://webservice.rakuten.co.jp/ で会員登録 (Rakuten ID) → 「アプリ ID 発行」。
-2. Xcode で `MangaMarker/App/Info.plist` を開き、`RakutenAppId` の値を発行された ID に置き換え。
-3. Build & Run。
+2. アプリ詳細ページで **「applicationId / アプリID」(数字のみ、通常 19 桁)** をコピー。
+   - ⚠️ **同じページに併記される UUID 形式の「affiliateId / アフィリエイトID」と間違えないこと**。
+     UUID を applicationId として使うと API は `HTTP 400 wrong_parameter ("specify valid applicationId")` を返します。
+3. Xcode で `MangaMarker/App/Info.plist` を開き、`RakutenAppId` の値を貼り替え。
+4. Product → Clean Build Folder → Build & Run。
+
+| 名称 | 形式 | 用途 | RakutenAppId に入れる? |
+|------|------|------|-------------------------|
+| applicationId / アプリID | 数字のみ (例: `1234567890123456789`) | API 認証 | ✅ |
+| affiliateId / アフィリエイトID | UUID (例: `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`) | アフィリエイト報酬計算用 | ❌ |
 
 > 未設定でもアプリは起動できますが、タイトル検索時にエラーメッセージで案内され、新刊検出は ISBN 近傍フォールバックのみで動作します。
+> DEBUG ビルドでは `RakutenAppId` にハイフンが含まれているとコンソールに警告ログを出します。
 
 ### トラブルシューティング: applicationId 設定済なのにエラーが出る
 

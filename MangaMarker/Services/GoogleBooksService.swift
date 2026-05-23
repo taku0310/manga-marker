@@ -3,7 +3,7 @@ import Foundation
 enum GoogleBooksError: LocalizedError {
     case invalidURL
     case notFound
-    case rateLimited
+    case rateLimited(usingApiKey: Bool)
     case http(Int, String?)
     case network(Error)
     case decoding(Error)
@@ -12,7 +12,11 @@ enum GoogleBooksError: LocalizedError {
         switch self {
         case .invalidURL: return "URLが不正です"
         case .notFound: return "該当する書籍が見つかりませんでした"
-        case .rateLimited: return "アクセス制限に達しました。しばらく待ってから再試行してください。"
+        case .rateLimited(let usingApiKey):
+            if usingApiKey {
+                return "アクセス制限に達しました (API キー使用中)。クォータを確認するか、しばらく待ってから再試行してください。"
+            }
+            return "Google Books API のアクセス制限に達しました。匿名利用は IP ベースで強く制限されます。Info.plist の GoogleBooksApiKey に Google Cloud Console で発行した API キーを設定してください (無料・100,000 req/日)。"
         case .http(let code, let detail):
             if let detail, !detail.isEmpty { return "HTTPエラー \(code): \(detail)" }
             return "HTTPエラー: \(code)"
@@ -81,19 +85,46 @@ final class GoogleBooksService {
         components.queryItems = items
         guard let url = components.url else { throw GoogleBooksError.invalidURL }
 
+        var urlRequest = URLRequest(url: url)
+        // iOS アプリ制限つき API キーを使う場合、Google API は
+        // X-Ios-Bundle-Identifier ヘッダで Bundle ID を判定する。
+        // 未送信だと API_KEY_IOS_APP_BLOCKED (iosBundleId=<empty>) で 403 が返るため必ず付与。
+        if let bundleId = Bundle.main.bundleIdentifier {
+            urlRequest.setValue(bundleId, forHTTPHeaderField: "X-Ios-Bundle-Identifier")
+        }
+
         #if DEBUG
         print("[GoogleBooks] GET \(url.absoluteString)")
+        if let bundleId = urlRequest.value(forHTTPHeaderField: "X-Ios-Bundle-Identifier") {
+            print("[GoogleBooks] X-Ios-Bundle-Identifier: \(bundleId)")
+        }
         #endif
 
         do {
-            let (data, response) = try await session.data(from: url)
+            let (data, response) = try await session.data(for: urlRequest)
             if let http = response as? HTTPURLResponse {
+                let body = String(data: data, encoding: .utf8)
                 switch http.statusCode {
-                case 200..<300: break
-                case 429: throw GoogleBooksError.rateLimited
-                case 404: throw GoogleBooksError.notFound
+                case 200..<300:
+                    break
+                case 429:
+                    #if DEBUG
+                    print("[GoogleBooks] HTTP 429 body: \(body ?? "")")
+                    #endif
+                    throw GoogleBooksError.rateLimited(usingApiKey: apiKey?.isEmpty == false)
+                case 403:
+                    // Google APIs はクォータ超過時に 403 + rateLimitExceeded で返すことがある
+                    #if DEBUG
+                    print("[GoogleBooks] HTTP 403 body: \(body ?? "")")
+                    #endif
+                    if (body ?? "").localizedCaseInsensitiveContains("rateLimitExceeded")
+                        || (body ?? "").localizedCaseInsensitiveContains("Daily Limit") {
+                        throw GoogleBooksError.rateLimited(usingApiKey: apiKey?.isEmpty == false)
+                    }
+                    throw GoogleBooksError.http(http.statusCode, body)
+                case 404:
+                    throw GoogleBooksError.notFound
                 default:
-                    let body = String(data: data, encoding: .utf8)
                     #if DEBUG
                     print("[GoogleBooks] HTTP \(http.statusCode) body: \(body ?? "")")
                     #endif

@@ -3,7 +3,7 @@ import Foundation
 enum GoogleBooksError: LocalizedError {
     case invalidURL
     case notFound
-    case rateLimited
+    case rateLimited(usingApiKey: Bool)
     case http(Int, String?)
     case network(Error)
     case decoding(Error)
@@ -12,7 +12,11 @@ enum GoogleBooksError: LocalizedError {
         switch self {
         case .invalidURL: return "URLが不正です"
         case .notFound: return "該当する書籍が見つかりませんでした"
-        case .rateLimited: return "アクセス制限に達しました。しばらく待ってから再試行してください。"
+        case .rateLimited(let usingApiKey):
+            if usingApiKey {
+                return "アクセス制限に達しました (API キー使用中)。クォータを確認するか、しばらく待ってから再試行してください。"
+            }
+            return "Google Books API のアクセス制限に達しました。匿名利用は IP ベースで強く制限されます。Info.plist の GoogleBooksApiKey に Google Cloud Console で発行した API キーを設定してください (無料・100,000 req/日)。"
         case .http(let code, let detail):
             if let detail, !detail.isEmpty { return "HTTPエラー \(code): \(detail)" }
             return "HTTPエラー: \(code)"
@@ -88,12 +92,28 @@ final class GoogleBooksService {
         do {
             let (data, response) = try await session.data(from: url)
             if let http = response as? HTTPURLResponse {
+                let body = String(data: data, encoding: .utf8)
                 switch http.statusCode {
-                case 200..<300: break
-                case 429: throw GoogleBooksError.rateLimited
-                case 404: throw GoogleBooksError.notFound
+                case 200..<300:
+                    break
+                case 429:
+                    #if DEBUG
+                    print("[GoogleBooks] HTTP 429 body: \(body ?? "")")
+                    #endif
+                    throw GoogleBooksError.rateLimited(usingApiKey: apiKey?.isEmpty == false)
+                case 403:
+                    // Google APIs はクォータ超過時に 403 + rateLimitExceeded で返すことがある
+                    #if DEBUG
+                    print("[GoogleBooks] HTTP 403 body: \(body ?? "")")
+                    #endif
+                    if (body ?? "").localizedCaseInsensitiveContains("rateLimitExceeded")
+                        || (body ?? "").localizedCaseInsensitiveContains("Daily Limit") {
+                        throw GoogleBooksError.rateLimited(usingApiKey: apiKey?.isEmpty == false)
+                    }
+                    throw GoogleBooksError.http(http.statusCode, body)
+                case 404:
+                    throw GoogleBooksError.notFound
                 default:
-                    let body = String(data: data, encoding: .utf8)
                     #if DEBUG
                     print("[GoogleBooks] HTTP \(http.statusCode) body: \(body ?? "")")
                     #endif

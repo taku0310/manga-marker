@@ -270,17 +270,18 @@ open MangaMarker.xcodeproj
 5. Deployment Target を **iOS 17.0** 以上に。
 6. **実機** でカメラ機能を確認 (シミュレーターはバーコードスキャン非対応)。
 
-### Google Books API のセットアップ (任意)
+### Google Books API のセットアップ (実質必須)
 
-タイトル検索と新刊検出は Google Books API を利用します。**認証情報なしでもそのまま動作します** (匿名クォータ 1,000 req/日)。本格運用やクォータ拡大が必要な場合のみ:
+タイトル検索と新刊検出は Google Books API を利用します。コード上は `GoogleBooksApiKey` 未設定でも動きますが、**Google は匿名アクセスを IP 単位で強くスロットルしており、シミュレータからは数回〜数十回で `HTTP 429 rateLimitExceeded` が返ります**。実用するには無料の API キー (個人プロジェクトのクォータ 100,000 req/日) を取得してください。
 
-1. [Google Cloud Console](https://console.cloud.google.com/) でプロジェクト作成
-2. 「APIとサービス」→ Books API を有効化
-3. 「認証情報」→ API キー作成 → アプリケーションの制限は **iOS** に絞ると安全
-4. Xcode で `MangaMarker/App/Info.plist` を開き、`GoogleBooksApiKey` の値を発行された API キーに置換
-5. Product → Clean Build Folder → Build & Run
+1. [Google Cloud Console](https://console.cloud.google.com/) でプロジェクト作成 (例: `manga-marker`)
+2. 「APIとサービス」→「ライブラリ」→ **「Books API」を検索 → 有効化**
+3. 「APIとサービス」→「認証情報」→ 「認証情報を作成」→ **「API キー」**
+4. (推奨) 「キーを制限」→ アプリケーションの制限を **「iOS アプリ」** に絞り、Bundle ID `com.example.MangaMarker` を追加
+5. Xcode で `MangaMarker/App/Info.plist` を開き、`GoogleBooksApiKey` の値を発行された API キー (`AIzaSy...`) に置換
+6. Product → Clean Build Folder → Build & Run
 
-> 未設定でも検索・新刊検出は問題なく動作します。`GoogleBooksApiKey` がプレースホルダ (`YOUR_GOOGLE_BOOKS_API_KEY`) または空のときは、`AppConfig.googleBooksApiKey` が nil を返し、`key=` パラメータ無しでリクエストが投げられます。
+> 未設定でも検索リクエスト自体は飛びますが、ほぼ確実にレート制限に当たります。エラーメッセージ「Google Books API のアクセス制限に達しました。匿名利用は IP ベースで強く制限されます。」が出たら API キー設定をしてください。
 
 ### 楽天ブックス API を採用しなかった理由
 
@@ -300,7 +301,7 @@ plutil -p ~/Library/Developer/Xcode/DerivedData/MangaMarker-*/Build/Products/Deb
 |------|------|------|
 | 何も検索結果が返らない | 入力タイトルの表記揺れ (旧字体・空白) | 別表記で試す。`langRestrict=ja` で日本語結果のみに制限済 |
 | 同じシリーズが大量に重複表示 | Google Books は出版社違いの再販版を別レコードで返す | 「ライブラリに追加」時には ISBN が一致するものは upsert で 1 件に集約される |
-| HTTP 429 | クォータ超過 (匿名 1,000 req/日) | `GoogleBooksApiKey` を設定してクォータを拡大、または時間を空ける |
+| HTTP 429 / 403 rateLimitExceeded | **匿名アクセスは Google 側で IP ベースで強くスロットルされ、数回で 429 になる** | `GoogleBooksApiKey` を設定 (上記セットアップ手順) してプロジェクト単位のクォータ 100,000 req/日 を使う |
 | `xcodegen generate` の度に Info.plist が初期化される | (修正済) | 本リポジトリの `project.yml` は `info:` ブロック未使用。古い構成を使っている場合は同様に削除 |
 | Clean Build が必要 | DerivedData に古い Info.plist がキャッシュ | Xcode → Product → Clean Build Folder (`⇧⌘K`) |
 

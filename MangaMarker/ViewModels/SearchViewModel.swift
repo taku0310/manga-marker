@@ -16,14 +16,14 @@ final class SearchViewModel: ObservableObject {
     @Published var errorMessage: String?
 
     private let openBDService: OpenBDService
-    private let rakutenService: RakutenBooksService
+    private let bookSearchService: GoogleBooksService
     private let repository: MangaRepository
 
     init(openBDService: OpenBDService,
-         rakutenService: RakutenBooksService,
+         bookSearchService: GoogleBooksService,
          repository: MangaRepository) {
         self.openBDService = openBDService
-        self.rakutenService = rakutenService
+        self.bookSearchService = bookSearchService
         self.repository = repository
     }
 
@@ -43,12 +43,10 @@ final class SearchViewModel: ObservableObject {
         case .title:
             await searchByTitle(trimmed)
         case .auto:
-            // 到達しない (resolvedMode で auto は解決済み)
             results = []
         }
     }
 
-    /// 入力からの自動判定。`mode` が auto の場合のみ動作。
     private func resolvedMode(for trimmed: String) -> SearchMode {
         if mode != .auto { return mode }
         let digitsOnlyish = trimmed.allSatisfy { $0.isNumber || $0 == "-" || $0 == " " }
@@ -72,9 +70,9 @@ final class SearchViewModel: ObservableObject {
             let book = try await openBDService.fetch(isbn: digits)
             results = [book]
         } catch {
-            // OpenBD で見つからない場合は楽天にフォールバック
+            // OpenBD で見つからない場合は Google Books に ISBN 検索でフォールバック
             do {
-                results = try await rakutenService.searchByTitle(digits)
+                results = try await bookSearchService.searchByTitle("isbn:\(digits)")
                 if results.isEmpty {
                     errorMessage = error.localizedDescription
                 }
@@ -87,13 +85,10 @@ final class SearchViewModel: ObservableObject {
 
     private func searchByTitle(_ input: String) async {
         do {
-            results = try await rakutenService.searchByTitle(input)
+            results = try await bookSearchService.searchByTitle(input)
             if results.isEmpty {
                 errorMessage = "該当する漫画が見つかりませんでした"
             }
-        } catch RakutenError.missingAppId {
-            errorMessage = "タイトル検索を有効化するには、Info.plist の RakutenAppId に楽天 API の applicationId を設定してください"
-            results = []
         } catch {
             errorMessage = error.localizedDescription
             results = []

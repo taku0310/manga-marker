@@ -3,24 +3,24 @@ import Foundation
 /// 登録済みシリーズの新刊を検出する。
 ///
 /// 戦略:
-/// 1) 楽天ブックス API でシリーズ名検索 (推奨) → 同一シリーズと判定できた書籍を比較。
-/// 2) 楽天 API が使えない / 該当ヒットがない場合のフォールバックとして、
-///    OpenBD で「最新巻 ISBN の近傍」を試行 (旧実装)。
+/// 1) Google Books API でシリーズ名検索 → 同一シリーズと判定できた書籍を比較。
+/// 2) Google Books が一件もヒットしない場合のフォールバックとして、
+///    OpenBD で「最新巻 ISBN の近傍」を試行。
 /// いずれの経路でも、最終的に「未登録 ISBN かつ 最新登録巻より新しい発売日」のみを採用し、
 /// `notifications_log` で冪等性を担保する。
 final class NewReleaseChecker {
     private let repository: MangaRepository
     private let openBDService: OpenBDService
-    private let rakutenService: RakutenBooksService
+    private let bookSearchService: GoogleBooksService
     private let notificationService: NotificationService
 
     init(repository: MangaRepository,
          openBDService: OpenBDService,
-         rakutenService: RakutenBooksService,
+         bookSearchService: GoogleBooksService,
          notificationService: NotificationService) {
         self.repository = repository
         self.openBDService = openBDService
-        self.rakutenService = rakutenService
+        self.bookSearchService = bookSearchService
         self.notificationService = notificationService
     }
 
@@ -34,17 +34,15 @@ final class NewReleaseChecker {
     func check(manga: Manga) async {
         let volumes = repository.fetchVolumes(mangaId: manga.id)
 
-        // Strategy 1: 楽天シリーズ検索
+        // Strategy 1: Google Books シリーズ検索
         do {
-            let books = try await rakutenService.searchSeries(manga.title)
+            let books = try await bookSearchService.searchSeries(manga.title)
             if !books.isEmpty {
                 await process(candidates: books, manga: manga, volumes: volumes)
                 return
             }
-        } catch RakutenError.missingAppId {
-            // appId 未設定なら静かにフォールバック
         } catch {
-            print("Rakuten series search failed for \(manga.title): \(error)")
+            print("Google Books series search failed for \(manga.title): \(error)")
         }
 
         // Strategy 2: OpenBD ISBN 近傍

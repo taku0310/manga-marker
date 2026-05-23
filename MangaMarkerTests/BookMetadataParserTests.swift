@@ -21,13 +21,11 @@ final class BookMetadataParserTests: XCTestCase {
         XCTAssertNil(BookMetadataParser.extractVolumeNumber(from: "巻数情報なし"))
     }
 
-    func test_parseRakutenSalesDate_full() {
-        XCTAssertNotNil(BookMetadataParser.parseRakutenSalesDate("2024年01月04日"))
-    }
-
-    func test_parseRakutenSalesDate_partial() {
-        XCTAssertNotNil(BookMetadataParser.parseRakutenSalesDate("2024年01月"))
-        XCTAssertNotNil(BookMetadataParser.parseRakutenSalesDate("2024年"))
+    func test_parseGoogleBooksDate() {
+        XCTAssertNotNil(BookMetadataParser.parseGoogleBooksDate("2024-01-04"))
+        XCTAssertNotNil(BookMetadataParser.parseGoogleBooksDate("2024-01"))
+        XCTAssertNotNil(BookMetadataParser.parseGoogleBooksDate("2024"))
+        XCTAssertNil(BookMetadataParser.parseGoogleBooksDate(nil))
     }
 
     func test_parseOpenBDDate_compact() {
@@ -41,44 +39,52 @@ final class BookMetadataParserTests: XCTestCase {
     }
 }
 
-final class RakutenItemDecodingTests: XCTestCase {
+final class GoogleBookDecodingTests: XCTestCase {
     func test_decodingAndMapping() throws {
-        let json = """
+        let json = #"""
         {
-          "Items": [
+          "items": [
             {
-              "title": "鬼滅の刃 23",
-              "author": "吾峠呼世晴",
-              "publisherName": "集英社",
-              "seriesName": "鬼滅の刃",
-              "isbn": "9784088832432",
-              "largeImageUrl": "http://example.com/cover.jpg",
-              "salesDate": "2020年12月04日"
+              "id": "abc",
+              "volumeInfo": {
+                "title": "鬼滅の刃 23",
+                "authors": ["吾峠呼世晴"],
+                "publisher": "集英社",
+                "publishedDate": "2020-12-04",
+                "industryIdentifiers": [
+                  {"type": "ISBN_10", "identifier": "4088832434"},
+                  {"type": "ISBN_13", "identifier": "9784088832432"}
+                ],
+                "imageLinks": {
+                  "thumbnail": "http://books.google.com/books/content?id=abc&printsec=frontcover&img=1&zoom=1"
+                },
+                "language": "ja"
+              }
             }
           ]
         }
-        """.data(using: .utf8)!
+        """#.data(using: .utf8)!
 
-        let response = try JSONDecoder().decode(RakutenSearchResponse.self, from: json)
-        let parsed = response.items.compactMap(\.toParsedBook)
+        let response = try JSONDecoder().decode(GoogleBooksResponse.self, from: json)
+        let parsed = (response.items ?? []).compactMap(\.toParsedBook)
         XCTAssertEqual(parsed.count, 1)
         let book = try XCTUnwrap(parsed.first)
         XCTAssertEqual(book.isbn, "9784088832432")
         XCTAssertEqual(book.series, "鬼滅の刃")
         XCTAssertEqual(book.volumeNumber, 23)
-        XCTAssertEqual(book.coverImageURL, "https://example.com/cover.jpg")
+        XCTAssertTrue(book.coverImageURL?.hasPrefix("https://") ?? false)
         XCTAssertNotNil(book.publishedAt)
     }
 
     func test_rejectsItemMissingISBN() throws {
-        let json = """
+        let json = #"""
         {
-          "Items": [
-            { "title": "no-isbn", "author": "x" }
+          "items": [
+            { "id": "noisbn", "volumeInfo": { "title": "no-isbn" } }
           ]
         }
-        """.data(using: .utf8)!
-        let response = try JSONDecoder().decode(RakutenSearchResponse.self, from: json)
-        XCTAssertTrue(response.items.compactMap(\.toParsedBook).isEmpty)
+        """#.data(using: .utf8)!
+        let response = try JSONDecoder().decode(GoogleBooksResponse.self, from: json)
+        XCTAssertTrue((response.items ?? []).compactMap(\.toParsedBook).isEmpty)
     }
 }

@@ -25,23 +25,23 @@ struct MangaMarkerApp: App {
 final class AppDependencies: ObservableObject {
     let repository: MangaRepository
     let openBDService: OpenBDService
-    let rakutenService: RakutenBooksService
+    let bookSearchService: GoogleBooksService
     let notificationService: NotificationService
     let newReleaseChecker: NewReleaseChecker
 
     init() {
         let repo = MangaRepository(db: DatabaseManager.shared)
         let openBD = OpenBDService()
-        let rakuten = RakutenBooksService()
+        let googleBooks = GoogleBooksService()
         let notif = NotificationService()
         self.repository = repo
         self.openBDService = openBD
-        self.rakutenService = rakuten
+        self.bookSearchService = googleBooks
         self.notificationService = notif
         self.newReleaseChecker = NewReleaseChecker(
             repository: repo,
             openBDService: openBD,
-            rakutenService: rakuten,
+            bookSearchService: googleBooks,
             notificationService: notif
         )
     }

@@ -1,18 +1,14 @@
 import Foundation
 
 enum AppConfig {
-    /// 楽天ウェブサービスで API 認証に使う値。Info.plist の `RakutenAppId` キーから読み込む。
-    /// https://webservice.rakuten.co.jp/ でアプリ登録のうえ取得。
-    ///
-    /// ⚠️ 注意:
-    /// - ダッシュボードに表示される **アプリケーションID** (UUID 形式) を渡しても
-    ///   API が `wrong_parameter ("specify valid applicationId")` を返すケースが報告されています。
-    /// - その場合は **アクセスキー** (目玉アイコンで表示できる秘密トークン) を設定してください。
-    /// - 古いドキュメントには「19 桁の数字」と書かれている場合がありますが、これは旧仕様です。
-    static var rakutenAppId: String? {
-        guard let value = Bundle.main.object(forInfoDictionaryKey: "RakutenAppId") as? String,
+    /// Google Books API キー (任意)。
+    /// 未設定でも匿名で 1,000 req/日 まで使えます。本格運用する場合は
+    /// https://console.cloud.google.com/ で API キーを発行し、
+    /// Info.plist の `GoogleBooksApiKey` キーに設定してください。
+    static var googleBooksApiKey: String? {
+        guard let value = Bundle.main.object(forInfoDictionaryKey: "GoogleBooksApiKey") as? String,
               !value.isEmpty,
-              value != "YOUR_RAKUTEN_APP_ID" else {
+              value != "YOUR_GOOGLE_BOOKS_API_KEY" else {
             return nil
         }
         return value

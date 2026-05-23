@@ -119,19 +119,19 @@ MangaMarker/
 │   ├── RootTabView.swift         # 3タブ構成(ライブラリ/検索/スキャン)
 │   └── Info.plist
 ├── Models/
-│   ├── Manga.swift               # Manga / Volume / MangaWithProgress
-│   ├── OpenBDResponse.swift      # OpenBD JSON → OpenBDParsedBook
-│   └── RakutenResponse.swift     # 楽天ブックス JSON → OpenBDParsedBook
+│   ├── Manga.swift                  # Manga / Volume / MangaWithProgress
+│   ├── OpenBDResponse.swift         # OpenBD JSON → OpenBDParsedBook
+│   └── GoogleBooksResponse.swift    # Google Books JSON → OpenBDParsedBook
 ├── Database/
 │   ├── DatabaseManager.swift     # SQLite open / migrate / queue
 │   └── MangaRepository.swift     # 全 CRUD
 ├── Services/
-│   ├── AppConfig.swift           # Info.plist 由来の設定値 (RakutenAppId)
+│   ├── AppConfig.swift           # Info.plist 由来の設定値 (GoogleBooksApiKey 任意)
 │   ├── BookMetadataParser.swift  # 巻数抽出・日付パース・タイトル正規化 (共有)
 │   ├── OpenBDService.swift       # ISBN 取得 / バルク取得
-│   ├── RakutenBooksService.swift # タイトル検索 / シリーズ検索
+│   ├── GoogleBooksService.swift  # タイトル検索 / シリーズ検索
 │   ├── NotificationService.swift # UNUserNotificationCenter
-│   └── NewReleaseChecker.swift   # 新刊チェック (楽天 + OpenBD 二段構え)
+│   └── NewReleaseChecker.swift   # 新刊チェック (Google Books + OpenBD 二段構え)
 ├── ViewModels/
 │   ├── MangaListViewModel.swift
 │   ├── MangaDetailViewModel.swift
@@ -172,37 +172,42 @@ UI のキーポイント:
 let book = try await openBDService.fetch(isbn: "9784088831824")
 ```
 
-### 4-2. 楽天ブックス (`Services/RakutenBooksService.swift`)
+### 4-2. Google Books (`Services/GoogleBooksService.swift`)
 
-OpenBD はタイトル検索ができないため、**楽天ブックス書籍検索 API** をタイトル検索とシリーズ検索に併用。
+OpenBD はタイトル検索ができないため、**Google Books API** をタイトル検索とシリーズ検索に併用。
+当初は楽天ブックス API を採用していましたが、現行の認証システムが本アプリで使う旧 API エンドポイントと
+互換性が無く 400 (`specify valid applicationId`) を返すため、認証不要の Google Books に切り替えました。
 
-- エンドポイント: `https://app.rakuten.co.jp/services/api/BooksBook/Search/20170404`
-- `applicationId` は **`Info.plist` の `RakutenAppId` キー** から `AppConfig` 経由で読み取る。
-- マンガジャンル (`booksGenreId=001001`) に限定 + 発売日降順 (`sort=-releaseDate`) で取得。
-- レスポンスは `RakutenSearchResponse` で受け、`RakutenItem.toParsedBook` で `OpenBDParsedBook` に正規化 (画像 URL は `https` に自動置換)。
+- エンドポイント: `https://www.googleapis.com/books/v1/volumes`
+- パラメータ: `q=intitle:<キーワード>`, `langRestrict=ja`, `printType=books`, `orderBy=relevance`, `maxResults=30`
+- 認証: **不要** (匿名で 1,000 req/日)。`Info.plist` の `GoogleBooksApiKey` を設定すればクォータを拡大可能。
+- レスポンスは `GoogleBooksResponse` → `GoogleBook.toParsedBook` で `OpenBDParsedBook` に正規化:
+  - ISBN_13 を優先、無ければ ISBN_10。**ISBN を持たない書籍は除外** (DB 整合性のため)
+  - 画像 URL は `http→https` に自動置換
+  - シリーズ名は Google Books に独立フィールドが無いため「タイトルから巻数を除いた残り」をヒューリスティックに推定
 - 公開メソッド:
-  - `searchByTitle(_:)`: タイトル/著者/キーワード検索 (SearchView 用)
-  - `searchSeries(_:)`: シリーズ名検索 → クライアント側で seriesName 一致フィルタ (NewReleaseChecker 用)
+  - `searchByTitle(_:)`: タイトル/シリーズ名でのフリーテキスト検索 (SearchView 用)
+  - `searchSeries(_:)`: シリーズ名検索 + クライアント側で series/title 一致フィルタ (NewReleaseChecker 用)
 
 ```swift
-let books = try await rakutenService.searchByTitle("鬼滅の刃")
-let candidates = try await rakutenService.searchSeries("ワンピース")
+let books = try await bookSearchService.searchByTitle("鬼滅の刃")
+let candidates = try await bookSearchService.searchSeries("ワンピース")
 ```
 
-**applicationId 取得**: [楽天ウェブサービス](https://webservice.rakuten.co.jp/) でアプリ登録 (無料) → Info.plist の `RakutenAppId` を発行された ID に置換。未設定でもアプリは起動でき、検索時にエラーメッセージで案内します。
+**API キー (任意)**: [Google Cloud Console](https://console.cloud.google.com/) で Books API を有効化し、API キーを発行 → `Info.plist` の `GoogleBooksApiKey` を置換。未設定でも匿名クォータ内で動作します。
 
 ### 4-3. 検索ロジック (SearchViewModel)
 
-- **自動モード** (デフォルト): 入力が「数字+ハイフン+空白のみ」かつ桁数が 10 または 13 のときは ISBN → OpenBD 検索。それ以外は楽天タイトル検索。
-- **ISBN モード**: 強制的に OpenBD 検索 (失敗時は楽天にフォールバック)。
-- **タイトルモード**: 強制的に楽天タイトル検索。
+- **自動モード** (デフォルト): 入力が「数字+ハイフン+空白のみ」かつ桁数が 10 または 13 のときは ISBN → OpenBD 検索。それ以外は Google Books タイトル検索。
+- **ISBN モード**: 強制的に OpenBD 検索 (失敗時は Google Books の `isbn:` 検索にフォールバック)。
+- **タイトルモード**: 強制的に Google Books タイトル検索。
 
 ### 4-4. 新刊検出 (`Services/NewReleaseChecker.swift`)
 
 二段構えで精度を確保:
 
-1. **楽天シリーズ検索** (主): `searchSeries(manga.title)` → 同一シリーズ判定 → 未登録 ISBN かつ最新巻より新しい発売日のみ採用。
-2. **OpenBD ISBN 近傍探索** (フォールバック): 楽天 API が使えない / ヒットなしの場合、最新巻 ISBN の隣接 8 件を OpenBD でバッチ取得。
+1. **Google Books シリーズ検索** (主): `searchSeries(manga.title)` → 同一シリーズ判定 → 未登録 ISBN かつ最新巻より新しい発売日のみ採用。
+2. **OpenBD ISBN 近傍探索** (フォールバック): Google Books が一件もヒットしない場合、最新巻 ISBN の隣接 8 件を OpenBD でバッチ取得。
 
 採用時は `volumes` テーブルへ自動登録 + `UNCalendarNotificationTrigger` でローカル通知を予約 + `notifications_log` で冪等性を担保。
 
@@ -231,8 +236,8 @@ let candidates = try await rakutenService.searchSeries("ワンピース")
 
 ## 6. 将来拡張
 
-- ~~**タイトル検索**~~ → **実装済** (楽天ブックス書籍検索 API)
-- ~~**新刊検出の精度向上**~~ → **実装済** (楽天シリーズ検索 + OpenBD 近傍 ISBN フォールバック)
+- ~~**タイトル検索**~~ → **実装済** (Google Books API)
+- ~~**新刊検出の精度向上**~~ → **実装済** (Google Books シリーズ検索 + OpenBD 近傍 ISBN フォールバック)
 - **iCloud / CloudKit 同期** : `manga` `volumes` を `CKRecord` でミラーし、
   複数端末・データ移行に対応。SQLite はキャッシュレイヤー化。
 - **WidgetKit / Live Activities** : ホーム画面に「次に読む」カードを常時表示。
@@ -265,63 +270,49 @@ open MangaMarker.xcodeproj
 5. Deployment Target を **iOS 17.0** 以上に。
 6. **実機** でカメラ機能を確認 (シミュレーターはバーコードスキャン非対応)。
 
-### 楽天 API のセットアップ
+### Google Books API のセットアップ (任意)
 
-タイトル検索と高精度な新刊検出を有効化するには、楽天ウェブサービスのアプリ登録が必要です。
+タイトル検索と新刊検出は Google Books API を利用します。**認証情報なしでもそのまま動作します** (匿名クォータ 1,000 req/日)。本格運用やクォータ拡大が必要な場合のみ:
 
-1. https://webservice.rakuten.co.jp/ で会員登録 (Rakuten ID) → 「新規アプリ登録」。
-2. 発行されたアプリ詳細ページで以下のいずれかをコピー。
-3. Xcode で `MangaMarker/App/Info.plist` を開き、`RakutenAppId` の値を貼り替え。
-4. Product → Clean Build Folder → Build & Run。
+1. [Google Cloud Console](https://console.cloud.google.com/) でプロジェクト作成
+2. 「APIとサービス」→ Books API を有効化
+3. 「認証情報」→ API キー作成 → アプリケーションの制限は **iOS** に絞ると安全
+4. Xcode で `MangaMarker/App/Info.plist` を開き、`GoogleBooksApiKey` の値を発行された API キーに置換
+5. Product → Clean Build Folder → Build & Run
 
-| 名称 | 形式 | RakutenAppId に入れる? |
-|------|------|-------------------------|
-| アプリケーションID | UUID 形式 (例: `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`) | まずこれを試す |
-| **アクセスキー** | 隠し表示の秘密トークン (目玉アイコンで表示) | **アプリケーションID で 400 が出る場合はこちら** |
-| アフィリエイトID | ドット区切り (例: `xxxxxxxx.xxxxxxxx.xxxxxxxx.xxxxxxxx`) | ❌ (API 認証ではなく報酬計算用) |
+> 未設定でも検索・新刊検出は問題なく動作します。`GoogleBooksApiKey` がプレースホルダ (`YOUR_GOOGLE_BOOKS_API_KEY`) または空のときは、`AppConfig.googleBooksApiKey` が nil を返し、`key=` パラメータ無しでリクエストが投げられます。
 
-> 楽天ウェブサービスは認証仕様の変更履歴があり、API バージョン (本アプリは `BooksBook/Search/20170404`) と発行されたキー形式の組み合わせによってどちらを使うかが変わります。
-> 古い解説に「19 桁の数字」とある場合は旧仕様なので、現在のダッシュボードの値を使ってください。
->
-> 未設定でもアプリは起動できますが、タイトル検索時にエラーメッセージで案内され、新刊検出は ISBN 近傍フォールバックのみで動作します。
+### 楽天ブックス API を採用しなかった理由
 
-### トラブルシューティング: applicationId 設定済なのにエラーが出る
+当初は楽天ブックス書籍検索 API (`BooksBook/Search/20170404`) を採用していましたが、現行の楽天ウェブサービスが発行する認証値 (UUID 形式の applicationId、`pk_` プレフィックスのアクセスキー) がこのレガシーエンドポイントと互換性が無く、`HTTP 400 specify valid applicationId` を返すため、認証不要・即利用可能な Google Books API に切り替えました。
 
-`Info.plist` の `RakutenAppId` を設定したのに「applicationId が設定されていません」と表示される場合、ビルドされた `.app` バンドル内の `Info.plist` にキーが反映されていない可能性が高いです。次のコマンドで確認できます。
+詳細はコミット履歴 (`Switch title search from Rakuten Books to Google Books API`) を参照してください。
+
+### トラブルシューティング
+
+ビルド済みアプリの Info.plist が想定どおり反映されているか確認:
 
 ```bash
-plutil -p ~/Library/Developer/Xcode/DerivedData/MangaMarker-*/Build/Products/Debug-iphonesimulator/MangaMarker.app/Info.plist | grep -i rakuten
+plutil -p ~/Library/Developer/Xcode/DerivedData/MangaMarker-*/Build/Products/Debug-iphonesimulator/MangaMarker.app/Info.plist | grep -i google
 ```
-
-何も出力されない場合、原因の多くは以下のいずれかです。
 
 | 症状 | 原因 | 対処 |
 |------|------|------|
-| `xcodegen generate` の度に Info.plist が初期化される | `project.yml` の `info:` ディレクティブが指定先パスに新しい Info.plist を**生成・上書き**するため | 本リポジトリの `project.yml` は `info:` を使わず `INFOPLIST_FILE` で参照のみする構成に修正済。古い `project.yml` を使っている場合は `info:` ブロックを削除して再生成 |
-| 手動セットアップで Info.plist が `INFOPLIST_FILE` に設定されていない | Target → Build Settings の `INFOPLIST_FILE` が空 / 別のパスを指す | Build Settings で `INFOPLIST_FILE = MangaMarker/App/Info.plist` を明示 |
-| プレースホルダのまま | `RakutenAppId` の値が `YOUR_RAKUTEN_APP_ID` のまま | 実 ID に置換 (空文字や `YOUR_RAKUTEN_APP_ID` は `AppConfig` で nil 扱い) |
-| Clean Build が必要 | DerivedData に古い Info.plist がキャッシュ | Xcode → Product → Clean Build Folder (`⇧⌘K`) して再ビルド |
-
-### トラブルシューティング: HTTP 400 (wrong_parameter) が出る
-
-`RakutenBooksService` で 400 が返るときは、レスポンスボディに楽天 API の `error_description` が含まれます。本リポジトリでは:
-
-- DEBUG ビルド時にコンソールへ `[Rakuten] GET <URL>` と `[Rakuten] HTTP 400 body: <JSON>` を出力
-- UI 上は `HTTPエラー 400: <error_description>` の形でアラート表示
-
-過去に確認された原因例:
-
-- `booksGenreId=001001` を渡していた → 楽天ブックスでは `001001` は「文芸書」で、API バージョンによってはマンガタイトル検索と組み合わせると `wrong_parameter` を返す。 → **本リポジトリでは genre 絞り込みを廃止し、結果はクライアント側で発売日降順にソートする方式に変更済**。
+| 何も検索結果が返らない | 入力タイトルの表記揺れ (旧字体・空白) | 別表記で試す。`langRestrict=ja` で日本語結果のみに制限済 |
+| 同じシリーズが大量に重複表示 | Google Books は出版社違いの再販版を別レコードで返す | 「ライブラリに追加」時には ISBN が一致するものは upsert で 1 件に集約される |
+| HTTP 429 | クォータ超過 (匿名 1,000 req/日) | `GoogleBooksApiKey` を設定してクォータを拡大、または時間を空ける |
+| `xcodegen generate` の度に Info.plist が初期化される | (修正済) | 本リポジトリの `project.yml` は `info:` ブロック未使用。古い構成を使っている場合は同様に削除 |
+| Clean Build が必要 | DerivedData に古い Info.plist がキャッシュ | Xcode → Product → Clean Build Folder (`⇧⌘K`) |
 
 ### 動作確認
 
-- 検索タブで「タイトル」モードに切り替え `鬼滅の刃` などを入力 → 楽天 API でシリーズの全巻が並ぶ。
-- 検索タブで「ISBN」モードに切り替え `9784088831824` を入力 → 1 件取得。
+- 検索タブで「タイトル」モードに切り替え `鬼滅の刃` などを入力 → Google Books からシリーズの巻一覧が返る。
+- 検索タブで「ISBN」モードに切り替え `9784088831824` を入力 → OpenBD で 1 件取得。
 - 「自動」モードでは入力を見て自動で振り分け。
 - スキャンタブで書籍裏表紙のバーコードをかざす → 自動追加。
 - ライブラリタブで進捗バーと「次に読む」バッジが表示される。
 - 詳細画面で巻をタップして読了マーク、または左スワイプで「ここまで読了」。
-- アプリ起動 + ライブラリ画面で Pull to Refresh → 楽天シリーズ検索による新刊チェックが走り、新刊が見つかれば自動で巻が追加され通知が予約される。
+- アプリ起動 + ライブラリ画面で Pull to Refresh → Google Books シリーズ検索による新刊チェックが走り、新刊が見つかれば自動で巻が追加され通知が予約される。
 
 ---
 

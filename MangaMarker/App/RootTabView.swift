@@ -18,7 +18,7 @@ struct RootTabView: View {
                 SearchView(
                     viewModel: SearchViewModel(
                         openBDService: deps.openBDService,
-                        rakutenService: deps.rakutenService,
+                        bookSearchService: deps.bookSearchService,
                         repository: deps.repository
                     )
                 )

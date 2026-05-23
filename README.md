@@ -275,6 +275,34 @@ open MangaMarker.xcodeproj
 
 > 未設定でもアプリは起動できますが、タイトル検索時にエラーメッセージで案内され、新刊検出は ISBN 近傍フォールバックのみで動作します。
 
+### トラブルシューティング: applicationId 設定済なのにエラーが出る
+
+`Info.plist` の `RakutenAppId` を設定したのに「applicationId が設定されていません」と表示される場合、ビルドされた `.app` バンドル内の `Info.plist` にキーが反映されていない可能性が高いです。次のコマンドで確認できます。
+
+```bash
+plutil -p ~/Library/Developer/Xcode/DerivedData/MangaMarker-*/Build/Products/Debug-iphonesimulator/MangaMarker.app/Info.plist | grep -i rakuten
+```
+
+何も出力されない場合、原因の多くは以下のいずれかです。
+
+| 症状 | 原因 | 対処 |
+|------|------|------|
+| `xcodegen generate` の度に Info.plist が初期化される | `project.yml` の `info:` ディレクティブが指定先パスに新しい Info.plist を**生成・上書き**するため | 本リポジトリの `project.yml` は `info:` を使わず `INFOPLIST_FILE` で参照のみする構成に修正済。古い `project.yml` を使っている場合は `info:` ブロックを削除して再生成 |
+| 手動セットアップで Info.plist が `INFOPLIST_FILE` に設定されていない | Target → Build Settings の `INFOPLIST_FILE` が空 / 別のパスを指す | Build Settings で `INFOPLIST_FILE = MangaMarker/App/Info.plist` を明示 |
+| プレースホルダのまま | `RakutenAppId` の値が `YOUR_RAKUTEN_APP_ID` のまま | 実 ID に置換 (空文字や `YOUR_RAKUTEN_APP_ID` は `AppConfig` で nil 扱い) |
+| Clean Build が必要 | DerivedData に古い Info.plist がキャッシュ | Xcode → Product → Clean Build Folder (`⇧⌘K`) して再ビルド |
+
+### トラブルシューティング: HTTP 400 (wrong_parameter) が出る
+
+`RakutenBooksService` で 400 が返るときは、レスポンスボディに楽天 API の `error_description` が含まれます。本リポジトリでは:
+
+- DEBUG ビルド時にコンソールへ `[Rakuten] GET <URL>` と `[Rakuten] HTTP 400 body: <JSON>` を出力
+- UI 上は `HTTPエラー 400: <error_description>` の形でアラート表示
+
+過去に確認された原因例:
+
+- `booksGenreId=001001` を渡していた → 楽天ブックスでは `001001` は「文芸書」で、API バージョンによってはマンガタイトル検索と組み合わせると `wrong_parameter` を返す。 → **本リポジトリでは genre 絞り込みを廃止し、結果はクライアント側で発売日降順にソートする方式に変更済**。
+
 ### 動作確認
 
 - 検索タブで「タイトル」モードに切り替え `鬼滅の刃` などを入力 → 楽天 API でシリーズの全巻が並ぶ。

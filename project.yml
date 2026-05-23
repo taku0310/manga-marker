@@ -24,10 +24,14 @@ targets:
       - path: MangaMarker
         excludes:
           - "App/Info.plist"
+      # Info.plist は XcodeGen に生成させず、INFOPLIST_FILE で参照のみ。
+      # (info: ディレクティブを使うと xcodegen generate 実行時に上書きされ、
+      #  RakutenAppId 等の手書きキーが消えるため、ここでは buildPhase: none で
+      #  プロジェクトに追加するだけに留める)
+      - path: MangaMarker/App/Info.plist
+        buildPhase: none
     resources:
       - path: MangaMarker/Resources/Assets.xcassets
-    info:
-      path: MangaMarker/App/Info.plist
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.example.MangaMarker

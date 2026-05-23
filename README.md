@@ -277,9 +277,12 @@ open MangaMarker.xcodeproj
 1. [Google Cloud Console](https://console.cloud.google.com/) でプロジェクト作成 (例: `manga-marker`)
 2. 「APIとサービス」→「ライブラリ」→ **「Books API」を検索 → 有効化**
 3. 「APIとサービス」→「認証情報」→ 「認証情報を作成」→ **「API キー」**
-4. (推奨) 「キーを制限」→ アプリケーションの制限を **「iOS アプリ」** に絞り、Bundle ID `com.example.MangaMarker` を追加
+4. **(推奨) 「キーを制限」→ アプリケーションの制限 → 「iOS アプリ」** を選び、**`MangaMarker/App/Info.plist` 内の Bundle ID と完全一致する値** (デフォルトは `com.example.MangaMarker`) を追加。
 5. Xcode で `MangaMarker/App/Info.plist` を開き、`GoogleBooksApiKey` の値を発行された API キー (`AIzaSy...`) に置換
 6. Product → Clean Build Folder → Build & Run
+
+> 本アプリは API リクエストに `X-Ios-Bundle-Identifier` ヘッダを自動付与するので、iOS アプリ制限つき API キーがそのまま使えます。
+> Bundle ID を変更している場合は、Google Cloud Console の制限リストにも同じ値を追加してください。一致していないと `HTTP 403 API_KEY_IOS_APP_BLOCKED` で弾かれます。
 
 > 未設定でも検索リクエスト自体は飛びますが、ほぼ確実にレート制限に当たります。エラーメッセージ「Google Books API のアクセス制限に達しました。匿名利用は IP ベースで強く制限されます。」が出たら API キー設定をしてください。
 
@@ -302,6 +305,7 @@ plutil -p ~/Library/Developer/Xcode/DerivedData/MangaMarker-*/Build/Products/Deb
 | 何も検索結果が返らない | 入力タイトルの表記揺れ (旧字体・空白) | 別表記で試す。`langRestrict=ja` で日本語結果のみに制限済 |
 | 同じシリーズが大量に重複表示 | Google Books は出版社違いの再販版を別レコードで返す | 「ライブラリに追加」時には ISBN が一致するものは upsert で 1 件に集約される |
 | HTTP 429 / 403 rateLimitExceeded | **匿名アクセスは Google 側で IP ベースで強くスロットルされ、数回で 429 になる** | `GoogleBooksApiKey` を設定 (上記セットアップ手順) してプロジェクト単位のクォータ 100,000 req/日 を使う |
+| HTTP 403 API_KEY_IOS_APP_BLOCKED | API キーに iOS アプリ制限を掛けたが、リクエストヘッダの Bundle ID と Google Cloud Console の制限リストが一致していない | コード側は `X-Ios-Bundle-Identifier` を自動付与済 (DEBUG ログで確認可能)。Cloud Console の制限リストに **Info.plist と完全一致する Bundle ID** を追加。Bundle ID を変更した場合も同じ |
 | `xcodegen generate` の度に Info.plist が初期化される | (修正済) | 本リポジトリの `project.yml` は `info:` ブロック未使用。古い構成を使っている場合は同様に削除 |
 | Clean Build が必要 | DerivedData に古い Info.plist がキャッシュ | Xcode → Product → Clean Build Folder (`⇧⌘K`) |
 

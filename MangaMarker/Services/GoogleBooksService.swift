@@ -85,12 +85,23 @@ final class GoogleBooksService {
         components.queryItems = items
         guard let url = components.url else { throw GoogleBooksError.invalidURL }
 
+        var urlRequest = URLRequest(url: url)
+        // iOS アプリ制限つき API キーを使う場合、Google API は
+        // X-Ios-Bundle-Identifier ヘッダで Bundle ID を判定する。
+        // 未送信だと API_KEY_IOS_APP_BLOCKED (iosBundleId=<empty>) で 403 が返るため必ず付与。
+        if let bundleId = Bundle.main.bundleIdentifier {
+            urlRequest.setValue(bundleId, forHTTPHeaderField: "X-Ios-Bundle-Identifier")
+        }
+
         #if DEBUG
         print("[GoogleBooks] GET \(url.absoluteString)")
+        if let bundleId = urlRequest.value(forHTTPHeaderField: "X-Ios-Bundle-Identifier") {
+            print("[GoogleBooks] X-Ios-Bundle-Identifier: \(bundleId)")
+        }
         #endif
 
         do {
-            let (data, response) = try await session.data(from: url)
+            let (data, response) = try await session.data(for: urlRequest)
             if let http = response as? HTTPURLResponse {
                 let body = String(data: data, encoding: .utf8)
                 switch http.statusCode {

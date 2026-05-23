@@ -267,22 +267,23 @@ open MangaMarker.xcodeproj
 
 ### 楽天 API のセットアップ
 
-タイトル検索と高精度な新刊検出を有効化するには、楽天ウェブサービスの applicationId が必要です。
+タイトル検索と高精度な新刊検出を有効化するには、楽天ウェブサービスのアプリ登録が必要です。
 
-1. https://webservice.rakuten.co.jp/ で会員登録 (Rakuten ID) → 「アプリ ID 発行」。
-2. アプリ詳細ページで **「applicationId / アプリID」(数字のみ、通常 19 桁)** をコピー。
-   - ⚠️ **同じページに併記される UUID 形式の「affiliateId / アフィリエイトID」と間違えないこと**。
-     UUID を applicationId として使うと API は `HTTP 400 wrong_parameter ("specify valid applicationId")` を返します。
+1. https://webservice.rakuten.co.jp/ で会員登録 (Rakuten ID) → 「新規アプリ登録」。
+2. 発行されたアプリ詳細ページで以下のいずれかをコピー。
 3. Xcode で `MangaMarker/App/Info.plist` を開き、`RakutenAppId` の値を貼り替え。
 4. Product → Clean Build Folder → Build & Run。
 
-| 名称 | 形式 | 用途 | RakutenAppId に入れる? |
-|------|------|------|-------------------------|
-| applicationId / アプリID | 数字のみ (例: `1234567890123456789`) | API 認証 | ✅ |
-| affiliateId / アフィリエイトID | UUID (例: `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`) | アフィリエイト報酬計算用 | ❌ |
+| 名称 | 形式 | RakutenAppId に入れる? |
+|------|------|-------------------------|
+| アプリケーションID | UUID 形式 (例: `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`) | まずこれを試す |
+| **アクセスキー** | 隠し表示の秘密トークン (目玉アイコンで表示) | **アプリケーションID で 400 が出る場合はこちら** |
+| アフィリエイトID | ドット区切り (例: `xxxxxxxx.xxxxxxxx.xxxxxxxx.xxxxxxxx`) | ❌ (API 認証ではなく報酬計算用) |
 
+> 楽天ウェブサービスは認証仕様の変更履歴があり、API バージョン (本アプリは `BooksBook/Search/20170404`) と発行されたキー形式の組み合わせによってどちらを使うかが変わります。
+> 古い解説に「19 桁の数字」とある場合は旧仕様なので、現在のダッシュボードの値を使ってください。
+>
 > 未設定でもアプリは起動できますが、タイトル検索時にエラーメッセージで案内され、新刊検出は ISBN 近傍フォールバックのみで動作します。
-> DEBUG ビルドでは `RakutenAppId` にハイフンが含まれているとコンソールに警告ログを出します。
 
 ### トラブルシューティング: applicationId 設定済なのにエラーが出る
 

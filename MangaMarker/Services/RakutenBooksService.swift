@@ -22,7 +22,7 @@ enum RakutenError: LocalizedError {
         case .http(let code, let detail):
             if let detail, !detail.isEmpty {
                 if detail.localizedCaseInsensitiveContains("applicationid") {
-                    return "applicationId が無効です。Info.plist の RakutenAppId に楽天ウェブサービスで発行された applicationId (数字のみ・通常 19 桁) を設定してください。UUID 形式のものは affiliateId なので API 認証には使えません。"
+                    return "applicationId が無効です。Info.plist の RakutenAppId に楽天ウェブサービスのダッシュボードに表示される値を設定してください。アプリケーションID (UUID) で 400 が返る場合は、同ページの「アクセスキー」(目玉アイコンで表示できる秘密トークン) を試してください。"
                 }
                 return "HTTPエラー \(code): \(detail)"
             }

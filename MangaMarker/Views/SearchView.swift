@@ -63,9 +63,11 @@ struct SearchView: View {
             Spacer()
         } else {
             List(viewModel.results) { book in
-                SearchResultRow(book: book) {
-                    if let manga = viewModel.addToLibrary(book) {
-                        navigateManga = manga
+                SearchResultRow(book: book, isAdding: viewModel.addingBookId == book.id) {
+                    Task {
+                        if let manga = await viewModel.addToLibrary(book) {
+                            navigateManga = manga
+                        }
                     }
                 }
             }
@@ -75,40 +77,30 @@ struct SearchView: View {
 
 private struct SearchResultRow: View {
     let book: OpenBDParsedBook
+    let isAdding: Bool
     let onAdd: () -> Void
+
+    /// シリーズ名を優先表示 (巻数は検索結果に表示しない)。
+    private var displayTitle: String { book.series ?? book.title }
 
     var body: some View {
         HStack(spacing: 12) {
             CoverImageView(urlString: book.coverImageURL, width: 56, height: 80)
             VStack(alignment: .leading, spacing: 4) {
-                Text(book.title).font(.headline).lineLimit(2)
-                if let series = book.series, series != book.title {
-                    Text(series).font(.caption).foregroundStyle(.secondary)
-                }
+                Text(displayTitle).font(.headline).lineLimit(2)
                 Text(book.author).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
-                HStack(spacing: 6) {
-                    if let v = book.volumeNumber {
-                        Label("第\(v)巻", systemImage: "number")
-                            .font(.caption2)
-                            .labelStyle(.titleOnly)
-                            .padding(.horizontal, 6).padding(.vertical, 2)
-                            .background(Color.accentColor.opacity(0.15), in: Capsule())
-                            .foregroundStyle(Color.accentColor)
-                    }
-                    if let date = book.publishedAt {
-                        Text(date, format: .dateTime.year().month())
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                }
             }
             Spacer()
-            Button(action: onAdd) {
-                Image(systemName: "plus.circle.fill").font(.title)
+            if isAdding {
+                ProgressView()
+            } else {
+                Button(action: onAdd) {
+                    Image(systemName: "plus.circle.fill").font(.title)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Color.accentColor)
+                .accessibilityLabel("全巻をライブラリに追加")
             }
-            .buttonStyle(.plain)
-            .foregroundStyle(Color.accentColor)
-            .accessibilityLabel("ライブラリに追加")
         }
     }
 }

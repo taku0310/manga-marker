@@ -56,6 +56,8 @@ final class RakutenKoboService: BookSearchService {
 
     /// 楽天Kobo の「コミック」ジャンル。マンガに絞り込むため付与する。
     private let mangaGenreId = "101"
+    /// 全巻取得時の最大ページ数 (1 ページ最大 30 件 = 最大 180 巻)。
+    private let maxPagesForAllVolumes = 6
 
     init(session: URLSession = .shared,
          appId: String? = AppConfig.rakutenAppId,
@@ -70,16 +72,9 @@ final class RakutenKoboService: BookSearchService {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return [] }
 
-        let queryItems: [URLQueryItem] = [
-            URLQueryItem(name: "format", value: "json"),
-            URLQueryItem(name: "applicationId", value: appId),
-            URLQueryItem(name: "accessKey", value: accessKey),
-            URLQueryItem(name: "koboGenreId", value: mangaGenreId),
-            URLQueryItem(name: "title", value: trimmed),
-            URLQueryItem(name: "hits", value: String(min(max(maxResults, 1), 30))),
-            URLQueryItem(name: "page", value: "1")
-        ]
-        let books = try await request(queryItems: queryItems)
+        let books = try await request(
+            queryItems: queryItems(appId: appId, accessKey: accessKey, title: trimmed, hits: maxResults, page: 1)
+        )
         return books.sorted { ($0.publishedAt ?? .distantPast) > ($1.publishedAt ?? .distantPast) }
     }
 
@@ -95,7 +90,36 @@ final class RakutenKoboService: BookSearchService {
         }
     }
 
+    func searchAllVolumes(seriesName: String) async throws -> [OpenBDParsedBook] {
+        guard let appId, let accessKey else { throw RakutenKoboError.missingCredentials }
+        let trimmed = seriesName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return [] }
+
+        var collected: [OpenBDParsedBook] = []
+        for page in 1...maxPagesForAllVolumes {
+            let items = try await request(
+                queryItems: queryItems(appId: appId, accessKey: accessKey, title: trimmed, hits: 30, page: page)
+            )
+            if items.isEmpty { break }
+            collected.append(contentsOf: items)
+            if items.count < 30 { break }
+        }
+        return SeriesVolumeFilter.allVolumes(from: collected, seriesName: trimmed)
+    }
+
     // MARK: - Private
+
+    private func queryItems(appId: String, accessKey: String, title: String, hits: Int, page: Int) -> [URLQueryItem] {
+        [
+            URLQueryItem(name: "format", value: "json"),
+            URLQueryItem(name: "applicationId", value: appId),
+            URLQueryItem(name: "accessKey", value: accessKey),
+            URLQueryItem(name: "koboGenreId", value: mangaGenreId),
+            URLQueryItem(name: "title", value: title),
+            URLQueryItem(name: "hits", value: String(min(max(hits, 1), 30))),
+            URLQueryItem(name: "page", value: String(min(max(page, 1), 100)))
+        ]
+    }
 
     private func request(queryItems: [URLQueryItem]) async throws -> [OpenBDParsedBook] {
         guard var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false) else {

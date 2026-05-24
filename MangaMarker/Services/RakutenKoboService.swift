@@ -1,7 +1,7 @@
 import Foundation
 
 enum RakutenKoboError: LocalizedError {
-    case missingAppId
+    case missingCredentials
     case invalidURL
     case notFound
     case rateLimited
@@ -11,8 +11,8 @@ enum RakutenKoboError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .missingAppId:
-            return "楽天 API の applicationId が未設定です。Info.plist の RakutenAppId を設定してください。"
+        case .missingCredentials:
+            return "楽天 API の認証情報が未設定です。Info.plist の RakutenAppId と RakutenAccessKey を設定してください。"
         case .invalidURL: return "URLが不正です"
         case .notFound: return "該当する電子書籍が見つかりませんでした"
         case .rateLimited: return "楽天 API のアクセス制限に達しました。"
@@ -40,31 +40,44 @@ private struct RakutenKoboAPIErrorBody: Decodable {
     }
 }
 
-/// 楽天Kobo電子書籍検索API クライアント。
+/// 楽天Kobo電子書籍検索API クライアント (新 OpenAPI)。
 /// マンガの取得件数が Google Books より多い傾向があるため、検索の第一候補に用いる。
-/// applicationId は `Info.plist` の `RakutenAppId` から `AppConfig` 経由で読み込む。
+///
+/// 認証は `applicationId` (UUID) と `accessKey` (`pk_` トークン) の両方が必要で、
+/// いずれも `Info.plist` の `RakutenAppId` / `RakutenAccessKey` から `AppConfig` 経由で取得する。
+/// 旧ホスト app.rakuten.co.jp は UUID 形式の applicationId を受け付けないため、
+/// 新ホスト openapi.rakuten.co.jp を使用する。
 /// https://webservice.rakuten.co.jp/documentation/kobo-ebook-search
 final class RakutenKoboService: BookSearchService {
     private let session: URLSession
-    private let baseURL = URL(string: "https://app.rakuten.co.jp/services/api/Kobo/EbookSearch/20170426")!
+    private let baseURL = URL(string: "https://openapi.rakuten.co.jp/services/api/Kobo/EbookSearch/20170426")!
     private let appId: String?
+    private let accessKey: String?
 
-    init(session: URLSession = .shared, appId: String? = AppConfig.rakutenAppId) {
+    /// 楽天Kobo の「コミック」ジャンル。マンガに絞り込むため付与する。
+    private let mangaGenreId = "101"
+
+    init(session: URLSession = .shared,
+         appId: String? = AppConfig.rakutenAppId,
+         accessKey: String? = AppConfig.rakutenAccessKey) {
         self.session = session
         self.appId = appId
+        self.accessKey = accessKey
     }
 
     func searchByTitle(_ title: String, maxResults: Int = 30) async throws -> [OpenBDParsedBook] {
-        guard let appId else { throw RakutenKoboError.missingAppId }
+        guard let appId, let accessKey else { throw RakutenKoboError.missingCredentials }
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return [] }
 
         let queryItems: [URLQueryItem] = [
+            URLQueryItem(name: "format", value: "json"),
             URLQueryItem(name: "applicationId", value: appId),
+            URLQueryItem(name: "accessKey", value: accessKey),
+            URLQueryItem(name: "koboGenreId", value: mangaGenreId),
             URLQueryItem(name: "title", value: trimmed),
             URLQueryItem(name: "hits", value: String(min(max(maxResults, 1), 30))),
-            URLQueryItem(name: "page", value: "1"),
-            URLQueryItem(name: "formatVersion", value: "2")
+            URLQueryItem(name: "page", value: "1")
         ]
         let books = try await request(queryItems: queryItems)
         return books.sorted { ($0.publishedAt ?? .distantPast) > ($1.publishedAt ?? .distantPast) }

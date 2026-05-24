@@ -28,6 +28,8 @@
     <string>YOUR_GOOGLE_BOOKS_API_KEY</string>
     <key>RakutenAppId</key>
     <string>YOUR_RAKUTEN_APP_ID</string>
+    <key>RakutenAccessKey</key>
+    <string>YOUR_RAKUTEN_ACCESS_KEY</string>
     <key>NSAppTransportSecurity</key>
     <dict>
         <key>NSAllowsArbitraryLoads</key>

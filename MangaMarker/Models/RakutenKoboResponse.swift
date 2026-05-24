@@ -1,16 +1,29 @@
 import Foundation
 
-/// 楽天Kobo電子書籍検索API (formatVersion=2) のレスポンス。
+/// 楽天Kobo電子書籍検索API のレスポンス。
+/// formatVersion 未指定 (v1) では `Items` が `[{"Item": {...}}]`、
+/// formatVersion=2 では `Items` が `[{...}]` のフラット配列になるため、両方に対応する。
 /// https://webservice.rakuten.co.jp/documentation/kobo-ebook-search
 struct RakutenKoboResponse: Decodable {
     let items: [RakutenKoboItem]
-    let count: Int?
-    let page: Int?
-    let pageCount: Int?
 
     enum CodingKeys: String, CodingKey {
         case items = "Items"
-        case count, page, pageCount
+    }
+
+    private struct ItemWrapper: Decodable {
+        let item: RakutenKoboItem
+        enum CodingKeys: String, CodingKey { case item = "Item" }
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        // v1 (wrapped) を優先的に試す。フラット構造では "Item" キーが無く失敗するため、その場合は v2 として解釈。
+        if let wrapped = try? container.decode([ItemWrapper].self, forKey: .items) {
+            items = wrapped.map(\.item)
+        } else {
+            items = (try? container.decode([RakutenKoboItem].self, forKey: .items)) ?? []
+        }
     }
 }
 

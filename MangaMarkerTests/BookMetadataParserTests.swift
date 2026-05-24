@@ -120,6 +120,32 @@ final class RakutenKoboDecodingTests: XCTestCase {
         XCTAssertNotNil(book.publishedAt)
     }
 
+    func test_decodingWrappedV1Structure() throws {
+        // formatVersion 未指定の v1 レスポンス: Items が {"Item": {...}} の配列
+        let json = """
+        {
+          "Items": [
+            {
+              "Item": {
+                "title": "ワンピース 100",
+                "seriesName": "ONE PIECE",
+                "author": "尾田栄一郎",
+                "itemNumber": "kobo-99999",
+                "salesDate": "2021年09月03日"
+              }
+            }
+          ],
+          "count": 1
+        }
+        """.data(using: .utf8)!
+
+        let response = try JSONDecoder().decode(RakutenKoboResponse.self, from: json)
+        let parsed = response.items.compactMap(\.toParsedBook)
+        XCTAssertEqual(parsed.count, 1)
+        XCTAssertEqual(parsed.first?.isbn, "kobo-99999")
+        XCTAssertEqual(parsed.first?.volumeNumber, 100)
+    }
+
     func test_rejectsItemMissingTitle() throws {
         let json = """
         { "Items": [ { "author": "x" } ] }

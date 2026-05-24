@@ -191,11 +191,14 @@ let candidates = try await bookSearch.searchSeries("ワンピース")
 
 #### 楽天Kobo電子書籍検索API (`Services/RakutenKoboService.swift`)
 
-- エンドポイント: `https://app.rakuten.co.jp/services/api/Kobo/EbookSearch/20170426`
-- `applicationId` は `Info.plist` の `RakutenAppId` から `AppConfig` 経由で取得。**未設定なら `.missingAppId` を throw → Composite が即 Google にフォールバック**。
-- レスポンスは `RakutenKoboResponse` → `RakutenKoboItem.toParsedBook` で正規化。
+- エンドポイント: **`https://openapi.rakuten.co.jp/services/api/Kobo/EbookSearch/20170426`** (新 OpenAPI ホスト)
+- 認証: **`applicationId` (UUID) と `accessKey` (`pk_` トークン) の両方** が必要。`Info.plist` の `RakutenAppId` / `RakutenAccessKey` から `AppConfig` 経由で取得。**どちらか欠けると `.missingCredentials` を throw → Composite が即 Google にフォールバック**。
+- パラメータ: `format=json`, `koboGenreId=101` (コミック), `title`, `hits`, `page`。
+- レスポンスは `RakutenKoboResponse` → `RakutenKoboItem.toParsedBook` で正規化。v1 (`{"Item": {...}}` ラップ) / v2 (フラット) の双方を decode 可能。
   - 電子書籍は ISBN を持たないことが多いため、**ISBN が無ければ `itemNumber` を識別子に採用** (`OpenBDParsedBook.isbn` は Optional 化済)。
   - 画像 URL は `http→https` に矯正。
+
+> ⚠️ 旧ホスト `app.rakuten.co.jp` は UUID 形式の applicationId を受け付けず `HTTP 400 specify valid applicationId` を返します。新ホスト `openapi.rakuten.co.jp` + `accessKey` 併用が現行の正しい方式です。
 
 #### Google Books API (`Services/GoogleBooksService.swift`)
 
@@ -296,23 +299,27 @@ open MangaMarker.xcodeproj
 
 ### 楽天Kobo API のセットアップ (任意・第一候補)
 
-検索の第一候補は楽天Kobo電子書籍検索API です。`RakutenAppId` を設定すると楽天Kobo を優先的に検索し、ヒットしなければ自動的に Google Books へフォールバックします。**未設定 (`YOUR_RAKUTEN_APP_ID` のまま) の場合は楽天Kobo をスキップし、Google Books のみで動作します**。
+検索の第一候補は楽天Kobo電子書籍検索API です。**`RakutenAppId` と `RakutenAccessKey` の両方** を設定すると楽天Kobo を優先的に検索し、ヒットしなければ自動的に Google Books へフォールバックします。**どちらか未設定の場合は楽天Kobo をスキップし、Google Books のみで動作します**。
 
-1. https://webservice.rakuten.co.jp/ でアプリ登録 → applicationId を取得
-2. Xcode で `MangaMarker/App/Info.plist` の `RakutenAppId` を発行値に置換
-3. Product → Clean Build Folder → Build & Run
+1. https://webservice.rakuten.co.jp/ でアプリ登録
+2. アプリ詳細から以下の **2 つ** をコピー
+   - **アプリケーションID** (UUID 形式、例 `8738d9c9-...`)
+   - **アクセスキー** (`pk_` プレフィックス、目玉アイコンで表示)
+3. Xcode で `MangaMarker/App/Info.plist` を開き
+   - `RakutenAppId` ← アプリケーションID
+   - `RakutenAccessKey` ← アクセスキー
+4. Product → Clean Build Folder → Build & Run
 
-> 楽天ウェブサービスの applicationId が `app.rakuten.co.jp` のレガシーエンドポイントで `HTTP 400 specify valid applicationId` を返す場合があります。その場合でも Composite が Google Books にフォールバックするため検索自体は継続して動作します (コンソールに `[RakutenKobo] HTTP 400 ...` が出ます)。
+> 現行の楽天 OpenAPI は **新ホスト `openapi.rakuten.co.jp` + `applicationId` + `accessKey`** の組み合わせで認証します。旧ホスト `app.rakuten.co.jp` は UUID 形式を受け付けず `HTTP 400 specify valid applicationId` を返すため使用しません。
+> 設定が誤っていても Composite が Google Books にフォールバックするため検索自体は継続動作します (コンソールに `[RakutenKobo] HTTP 400 ...` が出ます)。
 
 ### 検索フローまとめ
 
 | モード | 1st | 2nd | 3rd |
 |--------|-----|-----|-----|
-| タイトル | 楽天Kobo (`RakutenAppId` 設定時) | Google Books | — |
+| タイトル | 楽天Kobo (`RakutenAppId`+`RakutenAccessKey` 設定時) | Google Books | — |
 | ISBN | OpenBD | 楽天Kobo→Google の `isbn:` 検索 | — |
 | 新刊検出 | 楽天Kobo→Google シリーズ検索 | OpenBD ISBN 近傍 | — |
-
-詳細はコミット履歴 (`Switch title search from Rakuten Books to Google Books API`) を参照してください。
 
 ### トラブルシューティング
 

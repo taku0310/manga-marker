@@ -26,6 +26,8 @@
     <string>漫画のバーコードを読み取り、書誌情報を自動取得するためにカメラを使用します。</string>
     <key>GoogleBooksApiKey</key>
     <string>YOUR_GOOGLE_BOOKS_API_KEY</string>
+    <key>RakutenAppId</key>
+    <string>YOUR_RAKUTEN_APP_ID</string>
     <key>NSAppTransportSecurity</key>
     <dict>
         <key>NSAllowsArbitraryLoads</key>
@@ -33,6 +35,13 @@
         <key>NSExceptionDomains</key>
         <dict>
             <key>openbd.jp</key>
+            <dict>
+                <key>NSIncludesSubdomains</key>
+                <true/>
+                <key>NSExceptionAllowsInsecureHTTPLoads</key>
+                <false/>
+            </dict>
+            <key>rakuten.co.jp</key>
             <dict>
                 <key>NSIncludesSubdomains</key>
                 <true/>

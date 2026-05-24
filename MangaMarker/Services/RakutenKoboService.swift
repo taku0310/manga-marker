@@ -1,0 +1,128 @@
+import Foundation
+
+enum RakutenKoboError: LocalizedError {
+    case missingAppId
+    case invalidURL
+    case notFound
+    case rateLimited
+    case http(Int, String?)
+    case network(Error)
+    case decoding(Error)
+
+    var errorDescription: String? {
+        switch self {
+        case .missingAppId:
+            return "楽天 API の applicationId が未設定です。Info.plist の RakutenAppId を設定してください。"
+        case .invalidURL: return "URLが不正です"
+        case .notFound: return "該当する電子書籍が見つかりませんでした"
+        case .rateLimited: return "楽天 API のアクセス制限に達しました。"
+        case .http(let code, let detail):
+            if let detail, !detail.isEmpty { return "HTTPエラー \(code): \(detail)" }
+            return "HTTPエラー: \(code)"
+        case .network(let e): return "通信エラー: \(e.localizedDescription)"
+        case .decoding(let e): return "データ解析エラー: \(e.localizedDescription)"
+        }
+    }
+}
+
+private struct RakutenKoboAPIErrorBody: Decodable {
+    let error: String?
+    let errorDescription: String?
+
+    enum CodingKeys: String, CodingKey {
+        case error
+        case errorDescription = "error_description"
+    }
+
+    var displayMessage: String? {
+        let parts = [error, errorDescription].compactMap { $0?.isEmpty == false ? $0 : nil }
+        return parts.isEmpty ? nil : parts.joined(separator: " - ")
+    }
+}
+
+/// 楽天Kobo電子書籍検索API クライアント。
+/// マンガの取得件数が Google Books より多い傾向があるため、検索の第一候補に用いる。
+/// applicationId は `Info.plist` の `RakutenAppId` から `AppConfig` 経由で読み込む。
+/// https://webservice.rakuten.co.jp/documentation/kobo-ebook-search
+final class RakutenKoboService: BookSearchService {
+    private let session: URLSession
+    private let baseURL = URL(string: "https://app.rakuten.co.jp/services/api/Kobo/EbookSearch/20170426")!
+    private let appId: String?
+
+    init(session: URLSession = .shared, appId: String? = AppConfig.rakutenAppId) {
+        self.session = session
+        self.appId = appId
+    }
+
+    func searchByTitle(_ title: String, maxResults: Int = 30) async throws -> [OpenBDParsedBook] {
+        guard let appId else { throw RakutenKoboError.missingAppId }
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return [] }
+
+        let queryItems: [URLQueryItem] = [
+            URLQueryItem(name: "applicationId", value: appId),
+            URLQueryItem(name: "title", value: trimmed),
+            URLQueryItem(name: "hits", value: String(min(max(maxResults, 1), 30))),
+            URLQueryItem(name: "page", value: "1"),
+            URLQueryItem(name: "formatVersion", value: "2")
+        ]
+        let books = try await request(queryItems: queryItems)
+        return books.sorted { ($0.publishedAt ?? .distantPast) > ($1.publishedAt ?? .distantPast) }
+    }
+
+    func searchSeries(_ seriesName: String, maxResults: Int = 30) async throws -> [OpenBDParsedBook] {
+        let books = try await searchByTitle(seriesName, maxResults: maxResults)
+        let target = BookMetadataParser.normalizeTitle(seriesName)
+        return books.filter { book in
+            let candidates = [book.series, book.title].compactMap { $0 }
+            return candidates.contains { candidate in
+                let normalized = BookMetadataParser.normalizeTitle(candidate)
+                return normalized.contains(target) || target.contains(normalized)
+            }
+        }
+    }
+
+    // MARK: - Private
+
+    private func request(queryItems: [URLQueryItem]) async throws -> [OpenBDParsedBook] {
+        guard var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false) else {
+            throw RakutenKoboError.invalidURL
+        }
+        components.queryItems = queryItems
+        guard let url = components.url else { throw RakutenKoboError.invalidURL }
+
+        #if DEBUG
+        print("[RakutenKobo] GET \(url.absoluteString)")
+        #endif
+
+        do {
+            let (data, response) = try await session.data(from: url)
+            if let http = response as? HTTPURLResponse {
+                switch http.statusCode {
+                case 200..<300:
+                    break
+                case 429:
+                    throw RakutenKoboError.rateLimited
+                case 404:
+                    throw RakutenKoboError.notFound
+                default:
+                    let detail = (try? JSONDecoder().decode(RakutenKoboAPIErrorBody.self, from: data))?.displayMessage
+                    #if DEBUG
+                    if let body = String(data: data, encoding: .utf8) {
+                        print("[RakutenKobo] HTTP \(http.statusCode) body: \(body)")
+                    }
+                    #endif
+                    throw RakutenKoboError.http(http.statusCode, detail)
+                }
+            }
+            let decoded = try JSONDecoder().decode(RakutenKoboResponse.self, from: data)
+            return decoded.items.compactMap(\.toParsedBook)
+        } catch let e as RakutenKoboError {
+            throw e
+        } catch let e as DecodingError {
+            throw RakutenKoboError.decoding(e)
+        } catch {
+            throw RakutenKoboError.network(error)
+        }
+    }
+}

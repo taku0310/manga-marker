@@ -11,12 +11,12 @@ import Foundation
 final class NewReleaseChecker {
     private let repository: MangaRepository
     private let openBDService: OpenBDService
-    private let bookSearchService: GoogleBooksService
+    private let bookSearchService: BookSearchService
     private let notificationService: NotificationService
 
     init(repository: MangaRepository,
          openBDService: OpenBDService,
-         bookSearchService: GoogleBooksService,
+         bookSearchService: BookSearchService,
          notificationService: NotificationService) {
         self.repository = repository
         self.openBDService = openBDService
@@ -34,7 +34,7 @@ final class NewReleaseChecker {
     func check(manga: Manga) async {
         let volumes = repository.fetchVolumes(mangaId: manga.id)
 
-        // Strategy 1: Google Books シリーズ検索
+        // Strategy 1: オンライン書誌検索 (楽天Kobo → Google Books フォールバック)
         do {
             let books = try await bookSearchService.searchSeries(manga.title)
             if !books.isEmpty {
@@ -42,7 +42,7 @@ final class NewReleaseChecker {
                 return
             }
         } catch {
-            print("Google Books series search failed for \(manga.title): \(error)")
+            print("Series search failed for \(manga.title): \(error)")
         }
 
         // Strategy 2: OpenBD ISBN 近傍
@@ -59,8 +59,11 @@ final class NewReleaseChecker {
 
         for book in books {
             guard isSameSeries(book: book, manga: manga) else { continue }
-            guard !knownISBNs.contains(book.isbn) else { continue }
-            guard !repository.wasNotified(isbn: book.isbn) else { continue }
+
+            // ISBN が無いソース (楽天Kobo 等) では book.id を冪等キーに使う。
+            let dedupKey = book.isbn ?? book.id
+            if let isbn = book.isbn, knownISBNs.contains(isbn) { continue }
+            guard !repository.wasNotified(isbn: dedupKey) else { continue }
 
             // 発売日が最新巻より新しい必要がある (発売日不明の場合は採用しない)
             guard let pubDate = book.publishedAt, pubDate > latestPubDate else { continue }
@@ -85,10 +88,10 @@ final class NewReleaseChecker {
             await notificationService.scheduleNewReleaseNotification(
                 mangaTitle: manga.title,
                 volumeNumber: nextVolume,
-                isbn: book.isbn,
+                isbn: dedupKey,
                 releaseDate: pubDate
             )
-            repository.markNotified(isbn: book.isbn)
+            repository.markNotified(isbn: dedupKey)
         }
     }
 

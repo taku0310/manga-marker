@@ -88,3 +88,95 @@ final class GoogleBookDecodingTests: XCTestCase {
         XCTAssertTrue((response.items ?? []).compactMap(\.toParsedBook).isEmpty)
     }
 }
+
+final class RakutenKoboDecodingTests: XCTestCase {
+    func test_decodingAndMapping_withoutISBN() throws {
+        let json = """
+        {
+          "Items": [
+            {
+              "title": "鬼滅の刃 23",
+              "seriesName": "鬼滅の刃",
+              "author": "吾峠呼世晴",
+              "publisherName": "集英社",
+              "itemNumber": "kobo-12345",
+              "salesDate": "2020年12月04日",
+              "largeImageUrl": "http://thumbnail.image.rakuten.co.jp/cover.jpg"
+            }
+          ],
+          "count": 1
+        }
+        """.data(using: .utf8)!
+
+        let response = try JSONDecoder().decode(RakutenKoboResponse.self, from: json)
+        let parsed = response.items.compactMap(\.toParsedBook)
+        XCTAssertEqual(parsed.count, 1)
+        let book = try XCTUnwrap(parsed.first)
+        // ISBN が無いため itemNumber が識別子に使われる
+        XCTAssertEqual(book.isbn, "kobo-12345")
+        XCTAssertEqual(book.series, "鬼滅の刃")
+        XCTAssertEqual(book.volumeNumber, 23)
+        XCTAssertTrue(book.coverImageURL?.hasPrefix("https://") ?? false)
+        XCTAssertNotNil(book.publishedAt)
+    }
+
+    func test_rejectsItemMissingTitle() throws {
+        let json = """
+        { "Items": [ { "author": "x" } ] }
+        """.data(using: .utf8)!
+        let response = try JSONDecoder().decode(RakutenKoboResponse.self, from: json)
+        XCTAssertTrue(response.items.compactMap(\.toParsedBook).isEmpty)
+    }
+}
+
+final class CompositeBookSearchServiceTests: XCTestCase {
+    private final class StubService: BookSearchService {
+        let result: [OpenBDParsedBook]
+        let error: Error?
+        var titleCallCount = 0
+        init(result: [OpenBDParsedBook] = [], error: Error? = nil) {
+            self.result = result
+            self.error = error
+        }
+        func searchByTitle(_ title: String, maxResults: Int) async throws -> [OpenBDParsedBook] {
+            titleCallCount += 1
+            if let error { throw error }
+            return result
+        }
+        func searchSeries(_ seriesName: String, maxResults: Int) async throws -> [OpenBDParsedBook] {
+            if let error { throw error }
+            return result
+        }
+    }
+
+    private func sampleBook(_ title: String) -> OpenBDParsedBook {
+        OpenBDParsedBook(isbn: nil, title: title, series: nil, volumeNumber: 1,
+                         author: "", publisher: nil, coverImageURL: nil, publishedAt: nil)
+    }
+
+    func test_usesPrimaryWhenPrimaryReturnsResults() async throws {
+        let primary = StubService(result: [sampleBook("primary")])
+        let fallback = StubService(result: [sampleBook("fallback")])
+        let composite = CompositeBookSearchService(primary: primary, fallback: fallback)
+        let results = try await composite.searchByTitle("鬼滅", maxResults: 30)
+        XCTAssertEqual(results.first?.title, "primary")
+        XCTAssertEqual(fallback.titleCallCount, 0)
+    }
+
+    func test_fallsBackWhenPrimaryEmpty() async throws {
+        let primary = StubService(result: [])
+        let fallback = StubService(result: [sampleBook("fallback")])
+        let composite = CompositeBookSearchService(primary: primary, fallback: fallback)
+        let results = try await composite.searchByTitle("鬼滅", maxResults: 30)
+        XCTAssertEqual(results.first?.title, "fallback")
+    }
+
+    func test_fallsBackWhenPrimaryThrows() async throws {
+        struct Boom: Error {}
+        let primary = StubService(error: Boom())
+        let fallback = StubService(result: [sampleBook("fallback")])
+        let composite = CompositeBookSearchService(primary: primary, fallback: fallback)
+        let results = try await composite.searchByTitle("鬼滅", maxResults: 30)
+        XCTAssertEqual(results.first?.title, "fallback")
+    }
+}

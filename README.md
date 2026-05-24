@@ -120,18 +120,21 @@ MangaMarker/
 │   └── Info.plist
 ├── Models/
 │   ├── Manga.swift                  # Manga / Volume / MangaWithProgress
-│   ├── OpenBDResponse.swift         # OpenBD JSON → OpenBDParsedBook
-│   └── GoogleBooksResponse.swift    # Google Books JSON → OpenBDParsedBook
+│   ├── OpenBDResponse.swift         # OpenBD JSON → OpenBDParsedBook (isbn は Optional)
+│   ├── GoogleBooksResponse.swift    # Google Books JSON → OpenBDParsedBook
+│   └── RakutenKoboResponse.swift    # 楽天Kobo JSON → OpenBDParsedBook
 ├── Database/
 │   ├── DatabaseManager.swift     # SQLite open / migrate / queue
 │   └── MangaRepository.swift     # 全 CRUD
 ├── Services/
-│   ├── AppConfig.swift           # Info.plist 由来の設定値 (GoogleBooksApiKey 任意)
+│   ├── AppConfig.swift           # Info.plist 由来の設定値 (RakutenAppId / GoogleBooksApiKey)
 │   ├── BookMetadataParser.swift  # 巻数抽出・日付パース・タイトル正規化 (共有)
 │   ├── OpenBDService.swift       # ISBN 取得 / バルク取得
-│   ├── GoogleBooksService.swift  # タイトル検索 / シリーズ検索
+│   ├── BookSearchService.swift   # 検索プロトコル + Composite (楽天Kobo→Google フォールバック)
+│   ├── RakutenKoboService.swift  # 楽天Kobo電子書籍検索 (第一候補)
+│   ├── GoogleBooksService.swift  # Google Books 検索 (フォールバック)
 │   ├── NotificationService.swift # UNUserNotificationCenter
-│   └── NewReleaseChecker.swift   # 新刊チェック (Google Books + OpenBD 二段構え)
+│   └── NewReleaseChecker.swift   # 新刊チェック (Composite 検索 + OpenBD 二段構え)
 ├── ViewModels/
 │   ├── MangaListViewModel.swift
 │   ├── MangaDetailViewModel.swift
@@ -172,44 +175,49 @@ UI のキーポイント:
 let book = try await openBDService.fetch(isbn: "9784088831824")
 ```
 
-### 4-2. Google Books (`Services/GoogleBooksService.swift`)
+### 4-2. タイトル検索 (Composite: 楽天Kobo → Google Books)
 
-OpenBD はタイトル検索ができないため、**Google Books API** をタイトル検索とシリーズ検索に併用。
-当初は楽天ブックス API を採用していましたが、現行の認証システムが本アプリで使う旧 API エンドポイントと
-互換性が無く 400 (`specify valid applicationId`) を返すため、認証不要の Google Books に切り替えました。
-
-- エンドポイント: `https://www.googleapis.com/books/v1/volumes`
-- パラメータ: `q=intitle:<キーワード>`, `langRestrict=ja`, `printType=books`, `orderBy=relevance`, `maxResults=30`
-- 認証: **不要** (匿名で 1,000 req/日)。`Info.plist` の `GoogleBooksApiKey` を設定すればクォータを拡大可能。
-- レスポンスは `GoogleBooksResponse` → `GoogleBook.toParsedBook` で `OpenBDParsedBook` に正規化:
-  - ISBN_13 を優先、無ければ ISBN_10。**ISBN を持たない書籍は除外** (DB 整合性のため)
-  - 画像 URL は `http→https` に自動置換
-  - シリーズ名は Google Books に独立フィールドが無いため「タイトルから巻数を除いた残り」をヒューリスティックに推定
-- 公開メソッド:
-  - `searchByTitle(_:)`: タイトル/シリーズ名でのフリーテキスト検索 (SearchView 用)
-  - `searchSeries(_:)`: シリーズ名検索 + クライアント側で series/title 一致フィルタ (NewReleaseChecker 用)
+OpenBD はタイトル検索ができないため、タイトル/シリーズ検索は **`BookSearchService` プロトコル** に抽象化し、
+**`CompositeBookSearchService` が「楽天Kobo を第一候補、結果が空 or エラーなら Google Books にフォールバック」** する構成にしています (`Services/BookSearchService.swift`)。楽天Kobo の方がマンガの取得件数が多い傾向があるため第一候補に採用しています。
 
 ```swift
-let books = try await bookSearchService.searchByTitle("鬼滅の刃")
-let candidates = try await bookSearchService.searchSeries("ワンピース")
+let bookSearch: BookSearchService = CompositeBookSearchService(
+    primary: RakutenKoboService(),
+    fallback: GoogleBooksService()
+)
+let books = try await bookSearch.searchByTitle("鬼滅の刃")    // Kobo→Google
+let candidates = try await bookSearch.searchSeries("ワンピース")
 ```
 
-**API キー (任意)**: [Google Cloud Console](https://console.cloud.google.com/) で Books API を有効化し、API キーを発行 → `Info.plist` の `GoogleBooksApiKey` を置換。未設定でも匿名クォータ内で動作します。
+#### 楽天Kobo電子書籍検索API (`Services/RakutenKoboService.swift`)
+
+- エンドポイント: `https://app.rakuten.co.jp/services/api/Kobo/EbookSearch/20170426`
+- `applicationId` は `Info.plist` の `RakutenAppId` から `AppConfig` 経由で取得。**未設定なら `.missingAppId` を throw → Composite が即 Google にフォールバック**。
+- レスポンスは `RakutenKoboResponse` → `RakutenKoboItem.toParsedBook` で正規化。
+  - 電子書籍は ISBN を持たないことが多いため、**ISBN が無ければ `itemNumber` を識別子に採用** (`OpenBDParsedBook.isbn` は Optional 化済)。
+  - 画像 URL は `http→https` に矯正。
+
+#### Google Books API (`Services/GoogleBooksService.swift`)
+
+- エンドポイント: `https://www.googleapis.com/books/v1/volumes`
+- パラメータ: `q=intitle:<キーワード>`, `langRestrict=ja`, `printType=books`, `orderBy=relevance`
+- 認証: 匿名は IP ベースで強くスロットルされるため、`Info.plist` の `GoogleBooksApiKey` 設定を推奨。iOS 制限キー対応のため `X-Ios-Bundle-Identifier` ヘッダを自動付与。
+- ISBN_13 を優先、無ければ ISBN_10。シリーズ名はタイトルから巻数を除いた残りを推定。
 
 ### 4-3. 検索ロジック (SearchViewModel)
 
-- **自動モード** (デフォルト): 入力が「数字+ハイフン+空白のみ」かつ桁数が 10 または 13 のときは ISBN → OpenBD 検索。それ以外は Google Books タイトル検索。
-- **ISBN モード**: 強制的に OpenBD 検索 (失敗時は Google Books の `isbn:` 検索にフォールバック)。
-- **タイトルモード**: 強制的に Google Books タイトル検索。
+- **自動モード** (デフォルト): 入力が「数字+ハイフン+空白のみ」かつ桁数が 10 または 13 のときは ISBN → OpenBD 検索。それ以外は Composite (楽天Kobo→Google) タイトル検索。
+- **ISBN モード**: 強制的に OpenBD 検索 (失敗時は Composite の `isbn:` 検索にフォールバック)。
+- **タイトルモード**: 強制的に Composite タイトル検索。
 
 ### 4-4. 新刊検出 (`Services/NewReleaseChecker.swift`)
 
 二段構えで精度を確保:
 
-1. **Google Books シリーズ検索** (主): `searchSeries(manga.title)` → 同一シリーズ判定 → 未登録 ISBN かつ最新巻より新しい発売日のみ採用。
-2. **OpenBD ISBN 近傍探索** (フォールバック): Google Books が一件もヒットしない場合、最新巻 ISBN の隣接 8 件を OpenBD でバッチ取得。
+1. **Composite シリーズ検索** (主): `searchSeries(manga.title)` (楽天Kobo→Google) → 同一シリーズ判定 → 未登録かつ最新巻より新しい発売日のみ採用。
+2. **OpenBD ISBN 近傍探索** (フォールバック): Composite が一件もヒットしない場合、最新巻 ISBN の隣接 8 件を OpenBD でバッチ取得。
 
-採用時は `volumes` テーブルへ自動登録 + `UNCalendarNotificationTrigger` でローカル通知を予約 + `notifications_log` で冪等性を担保。
+採用時は `volumes` テーブルへ自動登録 + `UNCalendarNotificationTrigger` でローカル通知を予約 + `notifications_log` で冪等性を担保。ISBN が無いソースでは `OpenBDParsedBook.id` (タイトル+著者+巻数) を冪等キーに使用。
 
 同一シリーズ判定は `BookMetadataParser.normalizeTitle` (空白除去 + 小文字化 + `・` 除去) を用いた双方向部分一致。既知巻数と重複するもの (廉価版・愛蔵版など) は除外する。
 
@@ -286,9 +294,23 @@ open MangaMarker.xcodeproj
 
 > 未設定でも検索リクエスト自体は飛びますが、ほぼ確実にレート制限に当たります。エラーメッセージ「Google Books API のアクセス制限に達しました。匿名利用は IP ベースで強く制限されます。」が出たら API キー設定をしてください。
 
-### 楽天ブックス API を採用しなかった理由
+### 楽天Kobo API のセットアップ (任意・第一候補)
 
-当初は楽天ブックス書籍検索 API (`BooksBook/Search/20170404`) を採用していましたが、現行の楽天ウェブサービスが発行する認証値 (UUID 形式の applicationId、`pk_` プレフィックスのアクセスキー) がこのレガシーエンドポイントと互換性が無く、`HTTP 400 specify valid applicationId` を返すため、認証不要・即利用可能な Google Books API に切り替えました。
+検索の第一候補は楽天Kobo電子書籍検索API です。`RakutenAppId` を設定すると楽天Kobo を優先的に検索し、ヒットしなければ自動的に Google Books へフォールバックします。**未設定 (`YOUR_RAKUTEN_APP_ID` のまま) の場合は楽天Kobo をスキップし、Google Books のみで動作します**。
+
+1. https://webservice.rakuten.co.jp/ でアプリ登録 → applicationId を取得
+2. Xcode で `MangaMarker/App/Info.plist` の `RakutenAppId` を発行値に置換
+3. Product → Clean Build Folder → Build & Run
+
+> 楽天ウェブサービスの applicationId が `app.rakuten.co.jp` のレガシーエンドポイントで `HTTP 400 specify valid applicationId` を返す場合があります。その場合でも Composite が Google Books にフォールバックするため検索自体は継続して動作します (コンソールに `[RakutenKobo] HTTP 400 ...` が出ます)。
+
+### 検索フローまとめ
+
+| モード | 1st | 2nd | 3rd |
+|--------|-----|-----|-----|
+| タイトル | 楽天Kobo (`RakutenAppId` 設定時) | Google Books | — |
+| ISBN | OpenBD | 楽天Kobo→Google の `isbn:` 検索 | — |
+| 新刊検出 | 楽天Kobo→Google シリーズ検索 | OpenBD ISBN 近傍 | — |
 
 詳細はコミット履歴 (`Switch title search from Rakuten Books to Google Books API`) を参照してください。
 

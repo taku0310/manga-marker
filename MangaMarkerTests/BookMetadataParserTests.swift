@@ -173,6 +173,10 @@ final class CompositeBookSearchServiceTests: XCTestCase {
             if let error { throw error }
             return result
         }
+        func searchAllVolumes(seriesName: String) async throws -> [OpenBDParsedBook] {
+            if let error { throw error }
+            return result
+        }
     }
 
     private func sampleBook(_ title: String) -> OpenBDParsedBook {
@@ -204,5 +208,38 @@ final class CompositeBookSearchServiceTests: XCTestCase {
         let composite = CompositeBookSearchService(primary: primary, fallback: fallback)
         let results = try await composite.searchByTitle("鬼滅", maxResults: 30)
         XCTAssertEqual(results.first?.title, "fallback")
+    }
+}
+
+final class SeriesVolumeFilterTests: XCTestCase {
+    private func book(_ title: String, series: String?, volume: Int?, isbn: String? = nil) -> OpenBDParsedBook {
+        OpenBDParsedBook(isbn: isbn, title: title, series: series, volumeNumber: volume,
+                         author: "", publisher: nil, coverImageURL: nil, publishedAt: nil)
+    }
+
+    func test_representatives_oneRepresentativePerSeries_lowestVolume() {
+        let input = [
+            book("鬼滅の刃 23", series: "鬼滅の刃", volume: 23),
+            book("鬼滅の刃 1", series: "鬼滅の刃", volume: 1),
+            book("ONE PIECE 100", series: "ONE PIECE", volume: 100)
+        ]
+        let reps = SeriesVolumeFilter.representatives(from: input)
+        XCTAssertEqual(reps.count, 2)
+        // 鬼滅は最小巻 (1巻) が代表
+        XCTAssertEqual(reps.first?.volumeNumber, 1)
+        XCTAssertEqual(reps.first?.series, "鬼滅の刃")
+    }
+
+    func test_allVolumes_dedupByVolumeNumber_preferISBN_sortedAscending() {
+        let input = [
+            book("鬼滅の刃 2", series: "鬼滅の刃", volume: 2, isbn: nil),
+            book("鬼滅の刃 2 (廉価版)", series: "鬼滅の刃", volume: 2, isbn: "9784000000022"),
+            book("鬼滅の刃 1", series: "鬼滅の刃", volume: 1, isbn: "9784000000011"),
+            book("無関係作品 1", series: "別の漫画", volume: 1)
+        ]
+        let volumes = SeriesVolumeFilter.allVolumes(from: input, seriesName: "鬼滅の刃")
+        XCTAssertEqual(volumes.map(\.volumeNumber), [1, 2])
+        // 2巻は ISBN 持ちが優先される
+        XCTAssertEqual(volumes.last?.isbn, "9784000000022")
     }
 }

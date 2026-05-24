@@ -213,6 +213,12 @@ let candidates = try await bookSearch.searchSeries("ワンピース")
 - **ISBN モード**: 強制的に OpenBD 検索 (失敗時は Composite の `isbn:` 検索にフォールバック)。
 - **タイトルモード**: 強制的に Composite タイトル検索。
 
+#### 検索結果のシリーズ集約と全巻登録
+
+- 検索結果は `SeriesVolumeFilter.representatives` で **シリーズ単位に集約し、各シリーズ代表 1 件 (最小巻) のみ** を表示する (巻数バッジは非表示)。例: 「鬼滅」→ `鬼滅の刃` 1 行のみ。
+- 結果行の「＋」を押すと `searchAllVolumes(seriesName:)` でそのシリーズの全巻をページネーション取得し、`volumes` テーブルへ一括登録する (取得失敗時は代表のみ登録)。全巻取得は楽天Kobo / Google Books それぞれ最大 6 ページ (最大 180〜240 巻)。
+- バーコードスキャンからの登録は従来どおり単巻登録 (`BarcodeScannerViewModel.saveToLibrary`)。
+
 ### 4-4. 新刊検出 (`Services/NewReleaseChecker.swift`)
 
 二段構えで精度を確保:

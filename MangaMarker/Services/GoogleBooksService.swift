@@ -38,6 +38,8 @@ final class GoogleBooksService: BookSearchService {
     private let session: URLSession
     private let baseURL = URL(string: "https://www.googleapis.com/books/v1/volumes")!
     private let apiKey: String?
+    /// 全巻取得時の最大ページ数 (1 ページ最大 40 件 = 最大 240 巻)。
+    private let maxPagesForAllVolumes = 6
 
     init(session: URLSession = .shared, apiKey: String? = AppConfig.googleBooksApiKey) {
         self.session = session
@@ -66,15 +68,31 @@ final class GoogleBooksService: BookSearchService {
         }
     }
 
+    func searchAllVolumes(seriesName: String) async throws -> [OpenBDParsedBook] {
+        let trimmed = seriesName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return [] }
+
+        var collected: [OpenBDParsedBook] = []
+        let pageSize = 40
+        for page in 0..<maxPagesForAllVolumes {
+            let items = try await request(query: "intitle:\(trimmed)", maxResults: pageSize, startIndex: page * pageSize)
+            if items.isEmpty { break }
+            collected.append(contentsOf: items)
+            if items.count < pageSize { break }
+        }
+        return SeriesVolumeFilter.allVolumes(from: collected, seriesName: trimmed)
+    }
+
     // MARK: - Private
 
-    private func request(query: String, maxResults: Int) async throws -> [OpenBDParsedBook] {
+    private func request(query: String, maxResults: Int, startIndex: Int = 0) async throws -> [OpenBDParsedBook] {
         guard var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false) else {
             throw GoogleBooksError.invalidURL
         }
         var items: [URLQueryItem] = [
             URLQueryItem(name: "q", value: query),
             URLQueryItem(name: "maxResults", value: String(min(max(maxResults, 1), 40))),
+            URLQueryItem(name: "startIndex", value: String(max(startIndex, 0))),
             URLQueryItem(name: "langRestrict", value: "ja"),
             URLQueryItem(name: "printType", value: "books"),
             URLQueryItem(name: "orderBy", value: "relevance")

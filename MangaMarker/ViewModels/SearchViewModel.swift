@@ -16,11 +16,11 @@ final class SearchViewModel: ObservableObject {
     @Published var errorMessage: String?
 
     private let openBDService: OpenBDService
-    private let bookSearchService: GoogleBooksService
+    private let bookSearchService: BookSearchService
     private let repository: MangaRepository
 
     init(openBDService: OpenBDService,
-         bookSearchService: GoogleBooksService,
+         bookSearchService: BookSearchService,
          repository: MangaRepository) {
         self.openBDService = openBDService
         self.bookSearchService = bookSearchService
@@ -70,7 +70,7 @@ final class SearchViewModel: ObservableObject {
             let book = try await openBDService.fetch(isbn: digits)
             results = [book]
         } catch {
-            // OpenBD で見つからない場合は Google Books に ISBN 検索でフォールバック
+            // OpenBD で見つからない場合は書誌検索サービス (楽天Kobo→Google) にフォールバック
             do {
                 results = try await bookSearchService.searchByTitle("isbn:\(digits)")
                 if results.isEmpty {

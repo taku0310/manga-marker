@@ -35,6 +35,12 @@ enum BookMetadataParser {
         return parse(raw, formats: ["yyyy-MM-dd", "yyyy-MM", "yyyy"], locale: "en_US_POSIX")
     }
 
+    /// 楽天 (Kobo / Books) の `salesDate` (例: "2024年01月04日") を Date に変換。
+    static func parseRakutenSalesDate(_ raw: String?) -> Date? {
+        guard let raw, !raw.isEmpty else { return nil }
+        return parse(raw, formats: ["yyyy年MM月dd日", "yyyy年MM月", "yyyy年"], locale: "ja_JP_POSIX")
+    }
+
     /// シリーズ名の同一性比較用に文字列を正規化 (全角/半角空白除去・小文字化)。
     static func normalizeTitle(_ s: String) -> String {
         s.lowercased()

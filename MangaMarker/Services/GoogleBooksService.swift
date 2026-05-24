@@ -34,7 +34,7 @@ enum GoogleBooksError: LocalizedError {
 /// - ISBN を含まない結果は `GoogleBook.toParsedBook` で除外される (DB 整合性のため)。
 ///
 /// https://developers.google.com/books/docs/v1/using
-final class GoogleBooksService {
+final class GoogleBooksService: BookSearchService {
     private let session: URLSession
     private let baseURL = URL(string: "https://www.googleapis.com/books/v1/volumes")!
     private let apiKey: String?

@@ -83,8 +83,8 @@ struct OpenBDBook: Decodable {
 }
 
 struct OpenBDParsedBook: Hashable, Identifiable {
-    var id: String { isbn }
-    let isbn: String
+    /// ISBN または書誌固有 ID。楽天Kobo の電子書籍など ISBN を持たないソースでは nil になりうる。
+    let isbn: String?
     let title: String
     let series: String?
     let volumeNumber: Int?
@@ -92,4 +92,10 @@ struct OpenBDParsedBook: Hashable, Identifiable {
     let publisher: String?
     let coverImageURL: String?
     let publishedAt: Date?
+
+    /// SwiftUI の List / 重複排除用の安定キー。ISBN が無い場合はタイトル+著者+巻数で代替する。
+    var id: String {
+        if let isbn, !isbn.isEmpty { return isbn }
+        return "\(title)|\(author)|\(volumeNumber.map(String.init) ?? "")"
+    }
 }

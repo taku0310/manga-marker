@@ -25,23 +25,27 @@ struct MangaMarkerApp: App {
 final class AppDependencies: ObservableObject {
     let repository: MangaRepository
     let openBDService: OpenBDService
-    let bookSearchService: GoogleBooksService
+    let bookSearchService: BookSearchService
     let notificationService: NotificationService
     let newReleaseChecker: NewReleaseChecker
 
     init() {
         let repo = MangaRepository(db: DatabaseManager.shared)
         let openBD = OpenBDService()
-        let googleBooks = GoogleBooksService()
+        // 検索フロー: 楽天Kobo を第一候補、結果が無ければ Google Books にフォールバック。
+        let bookSearch: BookSearchService = CompositeBookSearchService(
+            primary: RakutenKoboService(),
+            fallback: GoogleBooksService()
+        )
         let notif = NotificationService()
         self.repository = repo
         self.openBDService = openBD
-        self.bookSearchService = googleBooks
+        self.bookSearchService = bookSearch
         self.notificationService = notif
         self.newReleaseChecker = NewReleaseChecker(
             repository: repo,
             openBDService: openBD,
-            bookSearchService: googleBooks,
+            bookSearchService: bookSearch,
             notificationService: notif
         )
     }

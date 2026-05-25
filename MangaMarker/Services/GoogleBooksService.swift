@@ -40,6 +40,10 @@ final class GoogleBooksService: BookSearchService {
     private let apiKey: String?
     /// 全巻取得時の最大ページ数 (1 ページ最大 40 件 = 最大 240 巻)。
     private let maxPagesForAllVolumes = 6
+    /// レート制限時の最大リトライ回数。
+    private let maxRetriesOnRateLimit = 4
+    /// ページ間ウェイト。
+    private let interPageDelayNanos: UInt64 = 300_000_000
 
     init(session: URLSession = .shared, apiKey: String? = AppConfig.googleBooksApiKey) {
         self.session = session
@@ -75,11 +79,11 @@ final class GoogleBooksService: BookSearchService {
         var collected: [OpenBDParsedBook] = []
         let pageSize = 40
         for page in 0..<maxPagesForAllVolumes {
-            // ページ単位のエラーは打ち切り扱いにし、それまでの取得結果を活かす。
             let items: [OpenBDParsedBook]
             do {
-                items = try await request(query: "intitle:\(trimmed)", maxResults: pageSize, startIndex: page * pageSize)
+                items = try await fetchPageWithRetry(query: "intitle:\(trimmed)", pageSize: pageSize, startIndex: page * pageSize)
             } catch {
+                // 結果尽き等の打ち切り。それまでの取得結果を活かす。
                 #if DEBUG
                 print("[GoogleBooks] searchAllVolumes page \(page) stopped: \(error.localizedDescription)")
                 #endif
@@ -88,12 +92,31 @@ final class GoogleBooksService: BookSearchService {
             if items.isEmpty { break }
             collected.append(contentsOf: items)
             if items.count < pageSize { break }
+            try? await Task.sleep(nanoseconds: interPageDelayNanos)
         }
         let volumes = SeriesVolumeFilter.allVolumes(from: collected, seriesName: trimmed)
         #if DEBUG
         print("[GoogleBooks] searchAllVolumes(\(trimmed)): collected=\(collected.count) volumes=\(volumes.count)")
         #endif
         return volumes
+    }
+
+    /// 1 ページ取得。レート制限時は指数バックオフでリトライ。
+    private func fetchPageWithRetry(query: String, pageSize: Int, startIndex: Int) async throws -> [OpenBDParsedBook] {
+        var attempt = 0
+        while true {
+            do {
+                return try await request(query: query, maxResults: pageSize, startIndex: startIndex)
+            } catch GoogleBooksError.rateLimited(_) {
+                guard attempt < maxRetriesOnRateLimit else { throw GoogleBooksError.rateLimited(usingApiKey: apiKey?.isEmpty == false) }
+                attempt += 1
+                let backoffNanos = UInt64(Double(1 << attempt) * 0.5 * 1_000_000_000)
+                #if DEBUG
+                print("[GoogleBooks] rate limited at startIndex \(startIndex), retry \(attempt)/\(maxRetriesOnRateLimit)")
+                #endif
+                try? await Task.sleep(nanoseconds: backoffNanos)
+            }
+        }
     }
 
     // MARK: - Private

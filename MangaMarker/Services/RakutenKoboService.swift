@@ -76,9 +76,16 @@ final class RakutenKoboService: BookSearchService {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return [] }
 
-        let books = try await request(
-            queryItems: queryItems(appId: appId, accessKey: accessKey, title: trimmed, hits: maxResults, page: 1)
+        // まず title 検索 (精度優先)。0 件ならカタカナ読み・別名対応のため keyword 検索へ
+        // フォールバック (楽天の検索インデックスが「ハンターハンター」→HUNTER×HUNTER 等を吸収)。
+        var books = try await request(
+            queryItems: queryItems(appId: appId, accessKey: accessKey, field: .title, value: trimmed, hits: maxResults, page: 1)
         )
+        if books.isEmpty {
+            books = try await request(
+                queryItems: queryItems(appId: appId, accessKey: accessKey, field: .keyword, value: trimmed, hits: maxResults, page: 1)
+            )
+        }
         return books.sorted { ($0.publishedAt ?? .distantPast) > ($1.publishedAt ?? .distantPast) }
     }
 
@@ -131,7 +138,7 @@ final class RakutenKoboService: BookSearchService {
         while true {
             do {
                 return try await request(
-                    queryItems: queryItems(appId: appId, accessKey: accessKey, title: title, hits: 30, page: page)
+                    queryItems: queryItems(appId: appId, accessKey: accessKey, field: .title, value: title, hits: 30, page: page)
                 )
             } catch RakutenKoboError.rateLimited {
                 guard attempt < maxRetriesOnRateLimit else { throw RakutenKoboError.rateLimited }
@@ -147,13 +154,20 @@ final class RakutenKoboService: BookSearchService {
 
     // MARK: - Private
 
-    private func queryItems(appId: String, accessKey: String, title: String, hits: Int, page: Int) -> [URLQueryItem] {
+    /// 検索フィールド。`title` は完全一致寄り、`keyword` は楽天の検索インデックス
+    /// (読み仮名・別名を吸収) を使う広い検索。
+    private enum SearchField: String {
+        case title
+        case keyword
+    }
+
+    private func queryItems(appId: String, accessKey: String, field: SearchField, value: String, hits: Int, page: Int) -> [URLQueryItem] {
         [
             URLQueryItem(name: "format", value: "json"),
             URLQueryItem(name: "applicationId", value: appId),
             URLQueryItem(name: "accessKey", value: accessKey),
             URLQueryItem(name: "koboGenreId", value: mangaGenreId),
-            URLQueryItem(name: "title", value: title),
+            URLQueryItem(name: field.rawValue, value: value),
             URLQueryItem(name: "hits", value: String(min(max(hits, 1), 30))),
             URLQueryItem(name: "page", value: String(min(max(page, 1), 100)))
         ]

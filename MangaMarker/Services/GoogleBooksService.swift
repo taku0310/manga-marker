@@ -75,12 +75,25 @@ final class GoogleBooksService: BookSearchService {
         var collected: [OpenBDParsedBook] = []
         let pageSize = 40
         for page in 0..<maxPagesForAllVolumes {
-            let items = try await request(query: "intitle:\(trimmed)", maxResults: pageSize, startIndex: page * pageSize)
+            // ページ単位のエラーは打ち切り扱いにし、それまでの取得結果を活かす。
+            let items: [OpenBDParsedBook]
+            do {
+                items = try await request(query: "intitle:\(trimmed)", maxResults: pageSize, startIndex: page * pageSize)
+            } catch {
+                #if DEBUG
+                print("[GoogleBooks] searchAllVolumes page \(page) stopped: \(error.localizedDescription)")
+                #endif
+                break
+            }
             if items.isEmpty { break }
             collected.append(contentsOf: items)
             if items.count < pageSize { break }
         }
-        return SeriesVolumeFilter.allVolumes(from: collected, seriesName: trimmed)
+        let volumes = SeriesVolumeFilter.allVolumes(from: collected, seriesName: trimmed)
+        #if DEBUG
+        print("[GoogleBooks] searchAllVolumes(\(trimmed)): collected=\(collected.count) volumes=\(volumes.count)")
+        #endif
+        return volumes
     }
 
     // MARK: - Private

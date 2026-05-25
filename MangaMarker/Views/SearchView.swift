@@ -4,25 +4,27 @@ struct SearchView: View {
     @StateObject var viewModel: SearchViewModel
     @EnvironmentObject private var deps: AppDependencies
     @State private var navigateManga: Manga?
+    @FocusState private var inputFocused: Bool
 
     var body: some View {
-        VStack(spacing: 0) {
-            Picker("検索モード", selection: $viewModel.mode) {
-                ForEach(SearchViewModel.SearchMode.allCases) { mode in
-                    Text(mode.rawValue).tag(mode)
+        VStack(spacing: 12) {
+            VStack(spacing: 12) {
+                Picker("検索モード", selection: $viewModel.mode) {
+                    ForEach(SearchViewModel.SearchMode.allCases) { mode in
+                        Text(mode.rawValue).tag(mode)
+                    }
                 }
+                .pickerStyle(.segmented)
+
+                searchField
             }
-            .pickerStyle(.segmented)
             .padding(.horizontal)
             .padding(.top, 8)
 
             content
         }
-        .navigationTitle("検索")
-        .searchable(text: $viewModel.query, prompt: searchPrompt)
-        .onSubmit(of: .search) {
-            Task { await viewModel.search() }
-        }
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar(.hidden, for: .navigationBar)
         .alert("エラー", isPresented: .constant(viewModel.errorMessage != nil)) {
             Button("OK") { viewModel.errorMessage = nil }
         } message: {
@@ -37,6 +39,33 @@ struct SearchView: View {
                 )
             )
         }
+        .onAppear { inputFocused = true }
+    }
+
+    private var searchField: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(.secondary)
+            TextField(searchPrompt, text: $viewModel.query)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .submitLabel(.search)
+                .focused($inputFocused)
+                .onSubmit { Task { await viewModel.search() } }
+            if !viewModel.query.isEmpty {
+                Button {
+                    viewModel.query = ""
+                    inputFocused = true
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("入力をクリア")
+            }
+        }
+        .padding(10)
+        .background(Color(.systemGray6), in: RoundedRectangle(cornerRadius: 10))
     }
 
     private var searchPrompt: String {
@@ -58,7 +87,7 @@ struct SearchView: View {
             ContentUnavailableView {
                 Label("漫画を検索", systemImage: "magnifyingglass")
             } description: {
-                Text("タイトル・著者名・ISBN いずれでも検索できます。\nバーコードを撮影するなら「スキャン」タブが便利です。")
+                Text("タイトル・著者名・ISBN いずれでも検索できます。")
             }
             Spacer()
         } else {

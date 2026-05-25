@@ -20,7 +20,8 @@ struct MangaListView: View {
                 .listStyle(.insetGrouped)
             }
         }
-        .navigationTitle("ライブラリ")
+        .navigationTitle("")
+        .navigationBarTitleDisplayMode(.inline)
         .searchable(text: $viewModel.searchText, prompt: "タイトルや著者を検索")
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
@@ -54,7 +55,7 @@ private struct EmptyLibraryView: View {
         ContentUnavailableView {
             Label("ライブラリは空です", systemImage: "books.vertical")
         } description: {
-            Text("「検索」または「スキャン」タブから漫画を追加できます")
+            Text("「検索」タブから漫画を追加できます")
         }
     }
 }

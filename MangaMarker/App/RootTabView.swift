@@ -26,18 +26,6 @@ struct RootTabView: View {
             .tabItem {
                 Label("検索", systemImage: "magnifyingglass")
             }
-
-            NavigationStack {
-                BarcodeScannerView(
-                    viewModel: BarcodeScannerViewModel(
-                        openBDService: deps.openBDService,
-                        repository: deps.repository
-                    )
-                )
-            }
-            .tabItem {
-                Label("スキャン", systemImage: "barcode.viewfinder")
-            }
         }
     }
 }

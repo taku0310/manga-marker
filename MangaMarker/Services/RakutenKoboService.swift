@@ -97,14 +97,28 @@ final class RakutenKoboService: BookSearchService {
 
         var collected: [OpenBDParsedBook] = []
         for page in 1...maxPagesForAllVolumes {
-            let items = try await request(
-                queryItems: queryItems(appId: appId, accessKey: accessKey, title: trimmed, hits: 30, page: page)
-            )
+            // 楽天 API は最終ページの次を要求すると 404/not_found を返すため、
+            // ページ単位のエラーは「打ち切り」として扱い、それまでの取得結果を活かす。
+            let items: [OpenBDParsedBook]
+            do {
+                items = try await request(
+                    queryItems: queryItems(appId: appId, accessKey: accessKey, title: trimmed, hits: 30, page: page)
+                )
+            } catch {
+                #if DEBUG
+                print("[RakutenKobo] searchAllVolumes page \(page) stopped: \(error.localizedDescription)")
+                #endif
+                break
+            }
             if items.isEmpty { break }
             collected.append(contentsOf: items)
             if items.count < 30 { break }
         }
-        return SeriesVolumeFilter.allVolumes(from: collected, seriesName: trimmed)
+        let volumes = SeriesVolumeFilter.allVolumes(from: collected, seriesName: trimmed)
+        #if DEBUG
+        print("[RakutenKobo] searchAllVolumes(\(trimmed)): collected=\(collected.count) volumes=\(volumes.count)")
+        #endif
+        return volumes
     }
 
     // MARK: - Private

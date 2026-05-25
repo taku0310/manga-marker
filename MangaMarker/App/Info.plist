@@ -22,8 +22,6 @@
     <string>1</string>
     <key>LSRequiresIPhoneOS</key>
     <true/>
-    <key>NSCameraUsageDescription</key>
-    <string>漫画のバーコードを読み取り、書誌情報を自動取得するためにカメラを使用します。</string>
     <key>GoogleBooksApiKey</key>
     <string>YOUR_GOOGLE_BOOKS_API_KEY</string>
     <key>RakutenAppId</key>

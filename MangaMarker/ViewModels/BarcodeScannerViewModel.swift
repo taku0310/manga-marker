@@ -41,7 +41,7 @@ final class BarcodeScannerViewModel: ObservableObject {
 
     func saveToLibrary() {
         guard let book = lastResult else { return }
-        let seriesTitle = book.series ?? book.title
+        let seriesTitle = book.seriesTitle
         guard let mangaId = repository.upsertManga(
             title: seriesTitle,
             author: book.author,

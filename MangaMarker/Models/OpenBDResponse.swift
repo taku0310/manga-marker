@@ -98,4 +98,11 @@ struct OpenBDParsedBook: Hashable, Identifiable {
         if let isbn, !isbn.isEmpty { return isbn }
         return "\(title)|\(author)|\(volumeNumber.map(String.init) ?? "")"
     }
+
+    /// シリーズ名。`series` があればそれを、無ければタイトルから巻数表記を除いたものを返す。
+    /// 全巻取得・シリーズ集約のキーとして用いる (巻数つきタイトルの混入を防ぐ)。
+    var seriesTitle: String {
+        if let series, !series.isEmpty { return series }
+        return BookMetadataParser.stripVolumeSuffix(from: title)
+    }
 }

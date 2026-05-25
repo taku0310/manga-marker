@@ -106,7 +106,8 @@ final class SearchViewModel: ObservableObject {
     /// 検索結果の代表を起点に、そのシリーズの全巻を取得してライブラリへ登録する。
     @discardableResult
     func addToLibrary(_ representative: OpenBDParsedBook) async -> Manga? {
-        let seriesTitle = representative.series ?? representative.title
+        // 巻数つきタイトルの混入を防ぐため、クリーンなシリーズ名を検索キー/登録名に使う
+        let seriesTitle = representative.seriesTitle
         addingBookId = representative.id
         defer { addingBookId = nil }
 

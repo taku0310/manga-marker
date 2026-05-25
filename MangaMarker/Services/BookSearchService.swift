@@ -79,7 +79,7 @@ enum SeriesVolumeFilter {
         var groups: [String: OpenBDParsedBook] = [:]
         var order: [String] = []
         for book in books {
-            let key = BookMetadataParser.normalizeTitle(book.series ?? book.title)
+            let key = BookMetadataParser.normalizeTitle(book.seriesTitle)
             if let existing = groups[key] {
                 if (book.volumeNumber ?? Int.max) < (existing.volumeNumber ?? Int.max) {
                     groups[key] = book
@@ -93,10 +93,7 @@ enum SeriesVolumeFilter {
     }
 
     private static func matchesSeries(_ book: OpenBDParsedBook, target: String) -> Bool {
-        let candidates = [book.series, book.title].compactMap { $0 }
-        return candidates.contains { candidate in
-            let normalized = BookMetadataParser.normalizeTitle(candidate)
-            return normalized.contains(target) || target.contains(normalized)
-        }
+        let normalized = BookMetadataParser.normalizeTitle(book.seriesTitle)
+        return normalized.contains(target) || target.contains(normalized)
     }
 }

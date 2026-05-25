@@ -37,6 +37,16 @@ final class BookMetadataParserTests: XCTestCase {
         XCTAssertEqual(BookMetadataParser.normalizeTitle("ONE PIECE"), "onepiece")
         XCTAssertEqual(BookMetadataParser.normalizeTitle("鬼滅 の 刃"), "鬼滅の刃")
     }
+
+    func test_stripVolumeSuffix() {
+        XCTAssertEqual(BookMetadataParser.stripVolumeSuffix(from: "鬼滅の刃 23"), "鬼滅の刃")
+        XCTAssertEqual(BookMetadataParser.stripVolumeSuffix(from: "鬼滅の刃 第23巻"), "鬼滅の刃")
+        XCTAssertEqual(BookMetadataParser.stripVolumeSuffix(from: "Berserk vol.40"), "Berserk")
+        XCTAssertEqual(BookMetadataParser.stripVolumeSuffix(from: "サンプル (12)"), "サンプル")
+        // タイトル先頭の数字や巻数の無いタイトルは保持
+        XCTAssertEqual(BookMetadataParser.stripVolumeSuffix(from: "20世紀少年 3"), "20世紀少年")
+        XCTAssertEqual(BookMetadataParser.stripVolumeSuffix(from: "AKIRA"), "AKIRA")
+    }
 }
 
 final class GoogleBookDecodingTests: XCTestCase {
@@ -228,6 +238,29 @@ final class SeriesVolumeFilterTests: XCTestCase {
         // 鬼滅は最小巻 (1巻) が代表
         XCTAssertEqual(reps.first?.volumeNumber, 1)
         XCTAssertEqual(reps.first?.series, "鬼滅の刃")
+    }
+
+    func test_representatives_groupsBySeriesEvenWhenSeriesFieldNil() {
+        // series が nil でもタイトルから巻数を除いて集約できること (代表のみ登録バグの回帰)
+        let input = [
+            book("鬼滅の刃 3", series: nil, volume: 3),
+            book("鬼滅の刃 1", series: nil, volume: 1),
+            book("鬼滅の刃 2", series: nil, volume: 2)
+        ]
+        let reps = SeriesVolumeFilter.representatives(from: input)
+        XCTAssertEqual(reps.count, 1)
+        XCTAssertEqual(reps.first?.volumeNumber, 1)
+    }
+
+    func test_allVolumes_matchesWhenSeriesFieldNil() {
+        // searchAllVolumes 相当: series が nil の巻でもクリーンなシリーズ名で照合できること
+        let input = [
+            book("鬼滅の刃 1", series: nil, volume: 1),
+            book("鬼滅の刃 2", series: nil, volume: 2),
+            book("鬼滅の刃 3", series: nil, volume: 3)
+        ]
+        let volumes = SeriesVolumeFilter.allVolumes(from: input, seriesName: "鬼滅の刃")
+        XCTAssertEqual(volumes.map(\.volumeNumber), [1, 2, 3])
     }
 
     func test_allVolumes_dedupByVolumeNumber_preferISBN_sortedAscending() {

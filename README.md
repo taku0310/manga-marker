@@ -190,7 +190,8 @@ let candidates = try await bookSearch.searchSeries("ワンピース")
 
 - エンドポイント: **`https://openapi.rakuten.co.jp/services/api/Kobo/EbookSearch/20170426`** (新 OpenAPI ホスト)
 - 認証: **`applicationId` (UUID) と `accessKey` (`pk_` トークン) の両方** が必要。`Info.plist` の `RakutenAppId` / `RakutenAccessKey` から `AppConfig` 経由で取得。**どちらか欠けると `.missingCredentials` を throw → Composite が即 Google にフォールバック**。
-- パラメータ: `format=json`, `koboGenreId=101` (コミック), `title`, `hits`, `page`。
+- パラメータ: `format=json`, `koboGenreId=101` (コミック), `title` または `keyword`, `hits`, `page`。
+- **カタカナ読み・別名対応**: `title=` で 0 件のときは `keyword=` 検索にフォールバックする。楽天の検索インデックスが読み仮名/別名を吸収するため「ハンターハンター」→`HUNTER×HUNTER`、「ブリーチ」→`BLEACH` のような検索がヒットする。
 - レスポンスは `RakutenKoboResponse` → `RakutenKoboItem.toParsedBook` で正規化。v1 (`{"Item": {...}}` ラップ) / v2 (フラット) の双方を decode 可能。
   - 電子書籍は ISBN を持たないことが多いため、**ISBN が無ければ `itemNumber` を識別子に採用** (`OpenBDParsedBook.isbn` は Optional 化済)。
   - 画像 URL は `http→https` に矯正。
@@ -200,7 +201,7 @@ let candidates = try await bookSearch.searchSeries("ワンピース")
 #### Google Books API (`Services/GoogleBooksService.swift`)
 
 - エンドポイント: `https://www.googleapis.com/books/v1/volumes`
-- パラメータ: `q=intitle:<キーワード>`, `langRestrict=ja`, `printType=books`, `orderBy=relevance`
+- パラメータ: `q=intitle:<キーワード>`, `langRestrict=ja`, `printType=books`, `orderBy=relevance`。`intitle:` で 0 件なら全文検索 (`q=<キーワード>`) にフォールバックし、読み仮名・別名のヒット率を上げる。
 - 認証: 匿名は IP ベースで強くスロットルされるため、`Info.plist` の `GoogleBooksApiKey` 設定を推奨。iOS 制限キー対応のため `X-Ios-Bundle-Identifier` ヘッダを自動付与。
 - ISBN_13 を優先、無ければ ISBN_10。シリーズ名はタイトルから巻数を除いた残りを推定。
 

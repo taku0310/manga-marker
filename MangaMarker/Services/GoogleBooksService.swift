@@ -50,12 +50,16 @@ final class GoogleBooksService: BookSearchService {
         self.apiKey = apiKey
     }
 
-    /// タイトル/シリーズ名でのフリーテキスト検索。`intitle:` を付けてタイトル優先で検索する。
+    /// タイトル/シリーズ名でのフリーテキスト検索。`intitle:` を付けてタイトル優先で検索し、
+    /// 0 件ならカタカナ読み・別名対応のため全文検索 (`intitle:` なし) にフォールバックする。
     /// 並び順はクライアント側で発売日降順。
     func searchByTitle(_ title: String, maxResults: Int = 30) async throws -> [OpenBDParsedBook] {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return [] }
-        let books = try await request(query: "intitle:\(trimmed)", maxResults: maxResults)
+        var books = try await request(query: "intitle:\(trimmed)", maxResults: maxResults)
+        if books.isEmpty {
+            books = try await request(query: trimmed, maxResults: maxResults)
+        }
         return books.sorted { ($0.publishedAt ?? .distantPast) > ($1.publishedAt ?? .distantPast) }
     }
 

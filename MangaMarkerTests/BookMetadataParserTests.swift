@@ -21,6 +21,19 @@ final class BookMetadataParserTests: XCTestCase {
         XCTAssertNil(BookMetadataParser.extractVolumeNumber(from: "巻数情報なし"))
     }
 
+    func test_extractVolumeNumber_fullwidth() {
+        // 楽天Kobo は全角数字・全角括弧を使うことが多い
+        XCTAssertEqual(BookMetadataParser.extractVolumeNumber(from: "あくたの死に際（４）"), 4)
+        XCTAssertEqual(BookMetadataParser.extractVolumeNumber(from: "獣王と薬草（８）"), 8)
+        XCTAssertEqual(BookMetadataParser.extractVolumeNumber(from: "鬼滅の刃　第１２巻"), 12)
+    }
+
+    func test_normalizeWidth_keepsJapanese() {
+        // カタカナ・漢字・ひらがなは変換しない、ASCII 全角のみ半角化
+        XCTAssertEqual(BookMetadataParser.normalizeWidth("あくたの死に際（４）"), "あくたの死に際(4)")
+        XCTAssertEqual(BookMetadataParser.normalizeWidth("ナルト"), "ナルト")
+    }
+
     func test_parseGoogleBooksDate() {
         XCTAssertNotNil(BookMetadataParser.parseGoogleBooksDate("2024-01-04"))
         XCTAssertNotNil(BookMetadataParser.parseGoogleBooksDate("2024-01"))
@@ -43,6 +56,8 @@ final class BookMetadataParserTests: XCTestCase {
         XCTAssertEqual(BookMetadataParser.stripVolumeSuffix(from: "鬼滅の刃 第23巻"), "鬼滅の刃")
         XCTAssertEqual(BookMetadataParser.stripVolumeSuffix(from: "Berserk vol.40"), "Berserk")
         XCTAssertEqual(BookMetadataParser.stripVolumeSuffix(from: "サンプル (12)"), "サンプル")
+        // 全角括弧・全角数字の巻数も除去
+        XCTAssertEqual(BookMetadataParser.stripVolumeSuffix(from: "あくたの死に際（４）"), "あくたの死に際")
         // タイトル先頭の数字や巻数の無いタイトルは保持
         XCTAssertEqual(BookMetadataParser.stripVolumeSuffix(from: "20世紀少年 3"), "20世紀少年")
         XCTAssertEqual(BookMetadataParser.stripVolumeSuffix(from: "AKIRA"), "AKIRA")

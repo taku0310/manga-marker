@@ -2,8 +2,8 @@
 
 漫画喫茶ユーザー向けの「既読漫画管理アプリ」(iOS / SwiftUI)。
 
-「何巻まで読んだか分からなくなる」問題を、SQLiteによるローカル管理 + OpenBD API
-による書誌情報取得 + バーコードスキャンで解決します。
+「何巻まで読んだか分からなくなる」問題を、SQLiteによるローカル管理 + OpenBD / 楽天Kobo / Google Books API
+による書誌情報取得・検索で解決します。
 
 ---
 
@@ -15,13 +15,13 @@
 ┌──────────────────────────────────────────────────────────┐
 │                       View (SwiftUI)                     │
 │  MangaListView / MangaDetailView / SearchView /          │
-│  BarcodeScannerView / RootTabView                        │
+│  RootTabView                                             │
 └──────────────────────────────────────────────────────────┘
                             │ @StateObject / @Published
 ┌──────────────────────────────────────────────────────────┐
 │                       ViewModel                          │
 │  MangaListViewModel / MangaDetailViewModel /             │
-│  SearchViewModel / BarcodeScannerViewModel               │
+│  SearchViewModel                                         │
 └──────────────────────────────────────────────────────────┘
             │ Repository                  │ Service
 ┌────────────────────────────┐   ┌──────────────────────────┐
@@ -45,11 +45,10 @@
 
 ### 主要フロー
 
-1. **検索** : ISBN を入力 → `SearchViewModel.search()` → OpenBD → 結果一覧 → タップで Repository に保存。
-2. **スキャン** : `AVCaptureSession` (EAN-13/EAN-8/UPC-E) → ISBN を取得 → OpenBD で詳細取得 → ライブラリへ追加。
-3. **既読管理** : 詳細画面で各巻を読了マーク。「ここまで読了」スワイプアクションで一括処理。
-4. **次に読む** : `Volume` を `volume_number` 昇順で取り出し、最初の `is_read = 0` をハイライト表示。
-5. **新刊通知** : 起動時に `NewReleaseChecker` が登録中シリーズの最新 ISBN を基点に近接 ISBN を OpenBD に問い合わせ、同シリーズかつ未登録なら追加 + ローカル通知をスケジュール。
+1. **検索** : タイトル / ISBN を入力 → `SearchViewModel.search()` → 楽天Kobo→Google / OpenBD → 結果一覧 → 「＋」でシリーズ全巻を Repository に保存。
+2. **既読管理** : 詳細画面で各巻を読了マーク。「ここまで読了」スワイプアクションで一括処理。
+3. **次に読む** : `Volume` を `volume_number` 昇順で取り出し、最初の `is_read = 0` をハイライト表示。
+4. **新刊通知** : 起動時に `NewReleaseChecker` が登録中シリーズを検索し、未登録かつ最新巻より新しい巻があれば追加 + ローカル通知をスケジュール。
 
 ---
 
@@ -116,7 +115,7 @@ SELECT * FROM volumes
 MangaMarker/
 ├── App/
 │   ├── MangaMarkerApp.swift      # @main, DI(AppDependencies), 起動時の処理
-│   ├── RootTabView.swift         # 3タブ構成(ライブラリ/検索/スキャン)
+│   ├── RootTabView.swift         # 2タブ構成(ライブラリ/検索)
 │   └── Info.plist
 ├── Models/
 │   ├── Manga.swift                  # Manga / Volume / MangaWithProgress
@@ -138,13 +137,11 @@ MangaMarker/
 ├── ViewModels/
 │   ├── MangaListViewModel.swift
 │   ├── MangaDetailViewModel.swift
-│   ├── SearchViewModel.swift
-│   └── BarcodeScannerViewModel.swift
+│   └── SearchViewModel.swift
 ├── Views/
 │   ├── MangaListView.swift       # ライブラリ一覧 + 検索 + 次に読む強調
 │   ├── MangaDetailView.swift     # 巻一覧 + 「次に読む」カード + スワイプ操作
-│   ├── SearchView.swift          # ISBN検索 + ライブラリ追加
-│   ├── BarcodeScannerView.swift  # AVCapture + 結果オーバーレイ
+│   ├── SearchView.swift          # タイトル/ISBN検索 + シリーズ全巻追加
 │   └── Components/
 │       └── MangaRowView.swift    # 行表示 + AsyncImage + Progress
 └── Resources/
@@ -219,7 +216,6 @@ let candidates = try await bookSearch.searchSeries("ワンピース")
 - 集約・全巻照合のキーには `OpenBDParsedBook.seriesTitle` を使う。API の `series` フィールドが空の場合は **タイトルから巻数表記を除去 (`BookMetadataParser.stripVolumeSuffix`)** してクリーンなシリーズ名を導出する。これにより `series` 未提供の作品でも「全巻」ではなく「代表のみ」になってしまう取りこぼしを防ぐ。
 - 結果行の「＋」を押すと `searchAllVolumes(seriesName:)` でそのシリーズの全巻をページネーション取得し、`volumes` テーブルへ一括登録する (取得失敗時は代表のみ登録)。全巻取得は楽天Kobo / Google Books それぞれ最大 6 ページ (最大 180〜240 巻)。
 - **ページネーションの打ち切り**: 楽天 API は最終ページの次を要求すると 404/`not_found` を返すため、各ページの取得エラーは throw せず「打ち切り」として扱い、それまでに集めた巻を活かす。これをしないと最後のページのエラーで全巻が破棄され「代表のみ登録」になる。DEBUG ビルドでは `searchAllVolumes(...): collected=X volumes=Y` を出力して取得・抽出件数を確認できる。
-- バーコードスキャンからの登録は従来どおり単巻登録 (`BarcodeScannerViewModel.saveToLibrary`)。
 
 ### 4-4. 新刊検出 (`Services/NewReleaseChecker.swift`)
 
@@ -234,34 +230,15 @@ let candidates = try await bookSearch.searchSeries("ワンピース")
 
 ---
 
-## 5. バーコードスキャン実装
+## 5. 将来拡張
 
-`Views/BarcodeScannerView.swift` 参照。
-
-- `AVCaptureSession` + `AVCaptureMetadataOutput`、対応コード: `.ean13`, `.ean8`, `.upce`。
-- `UIViewControllerRepresentable` で SwiftUI に橋渡し。
-- 1.5 秒以内の連続スキャンを抑止し、`UINotificationFeedbackGenerator` でハプティック。
-- 取得した文字列が `978`/`979` 始まりの 13 桁数字であれば書籍 ISBN と判定 → ViewModel に通知。
-- `Info.plist` に `NSCameraUsageDescription` を設定 (本リポジトリで設定済み)。
-
-### Info.plist 設定
-
-```xml
-<key>NSCameraUsageDescription</key>
-<string>漫画のバーコードを読み取り、書誌情報を自動取得するためにカメラを使用します。</string>
-```
-
----
-
-## 6. 将来拡張
-
-- ~~**タイトル検索**~~ → **実装済** (Google Books API)
-- ~~**新刊検出の精度向上**~~ → **実装済** (Google Books シリーズ検索 + OpenBD 近傍 ISBN フォールバック)
+- ~~**タイトル検索**~~ → **実装済** (楽天Kobo→Google Books)
+- ~~**新刊検出の精度向上**~~ → **実装済** (Composite シリーズ検索 + OpenBD 近傍 ISBN フォールバック)
+- **バーコードスキャン登録** : `AVFoundation` で ISBN を読み取り自動登録 (一度実装したが要件外のため削除済。再導入時は `NSCameraUsageDescription` の追加が必要)。
 - **iCloud / CloudKit 同期** : `manga` `volumes` を `CKRecord` でミラーし、
   複数端末・データ移行に対応。SQLite はキャッシュレイヤー化。
 - **WidgetKit / Live Activities** : ホーム画面に「次に読む」カードを常時表示。
 - **App Intents / Siri Shortcuts** : 「次に読む巻を教えて」発話で読み上げ。
-- **OCR フォールバック** : バーコードが汚れている場合、Vision で背表紙テキスト OCR。
 - **共有ライブラリ** : 漫画喫茶店内の友人と読書状況を共有 (CloudKit Sharing)。
 - **ダーク/ライト最適化** + アクセシビリティ (Dynamic Type、VoiceOver ラベル整備)。
 - **テスト** : `MangaRepositoryTests` を出発点に、`OpenBDService` をプロトコル化して URLProtocol スタブで網羅。
@@ -285,9 +262,9 @@ open MangaMarker.xcodeproj
 1. Xcode で **iOS → App → Interface: SwiftUI / Language: Swift** で新規プロジェクトを `MangaMarker` 名で作成。
 2. 既定生成された `ContentView.swift` 等を削除し、本リポジトリの `MangaMarker/` 配下を全てコピー (フォルダ参照ではなくグループとして追加)。
 3. Target → **Frameworks, Libraries, and Embedded Content** に `libsqlite3.tbd` を追加。
-4. `Info.plist` を本リポジトリのものに置き換え (またはキー `NSCameraUsageDescription` を追記)。
+4. `Info.plist` を本リポジトリのものに置き換え (API キー類を設定)。
 5. Deployment Target を **iOS 17.0** 以上に。
-6. **実機** でカメラ機能を確認 (シミュレーターはバーコードスキャン非対応)。
+6. シミュレータ / 実機いずれでもビルド・動作可能 (カメラ等のハード依存機能は無し)。
 
 ### Google Books API のセットアップ (実質必須)
 
@@ -348,10 +325,9 @@ plutil -p ~/Library/Developer/Xcode/DerivedData/MangaMarker-*/Build/Products/Deb
 
 ### 動作確認
 
-- 検索タブで「タイトル」モードに切り替え `鬼滅の刃` などを入力 → Google Books からシリーズの巻一覧が返る。
-- 検索タブで「ISBN」モードに切り替え `9784088831824` を入力 → OpenBD で 1 件取得。
+- 検索タブで「タイトル」モードに切り替え `鬼滅の刃` などを入力 → シリーズ代表 1 件が返り、「＋」で全巻登録。
+- 検索タブで「ISBN」モードに切り替え `9784088831824` を入力 → OpenBD で取得。
 - 「自動」モードでは入力を見て自動で振り分け。
-- スキャンタブで書籍裏表紙のバーコードをかざす → 自動追加。
 - ライブラリタブで進捗バーと「次に読む」バッジが表示される。
 - 詳細画面で巻をタップして読了マーク、または左スワイプで「ここまで読了」。
 - アプリ起動 + ライブラリ画面で Pull to Refresh → Google Books シリーズ検索による新刊チェックが走り、新刊が見つかれば自動で巻が追加され通知が予約される。

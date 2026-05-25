@@ -58,6 +58,10 @@ final class RakutenKoboService: BookSearchService {
     private let mangaGenreId = "101"
     /// 全巻取得時の最大ページ数 (1 ページ最大 30 件 = 最大 180 巻)。
     private let maxPagesForAllVolumes = 6
+    /// レート制限 (429) 時の最大リトライ回数。
+    private let maxRetriesOnRateLimit = 4
+    /// レート制限回避のためのページ間ウェイト (楽天はおよそ 1 req/秒)。
+    private let interPageDelayNanos: UInt64 = 800_000_000
 
     init(session: URLSession = .shared,
          appId: String? = AppConfig.rakutenAppId,
@@ -97,14 +101,11 @@ final class RakutenKoboService: BookSearchService {
 
         var collected: [OpenBDParsedBook] = []
         for page in 1...maxPagesForAllVolumes {
-            // 楽天 API は最終ページの次を要求すると 404/not_found を返すため、
-            // ページ単位のエラーは「打ち切り」として扱い、それまでの取得結果を活かす。
             let items: [OpenBDParsedBook]
             do {
-                items = try await request(
-                    queryItems: queryItems(appId: appId, accessKey: accessKey, title: trimmed, hits: 30, page: page)
-                )
+                items = try await fetchPageWithRetry(appId: appId, accessKey: accessKey, title: trimmed, page: page)
             } catch {
+                // 末尾ページ超過の 404/not_found 等は「打ち切り」として扱い、それまでの取得結果を活かす。
                 #if DEBUG
                 print("[RakutenKobo] searchAllVolumes page \(page) stopped: \(error.localizedDescription)")
                 #endif
@@ -113,12 +114,35 @@ final class RakutenKoboService: BookSearchService {
             if items.isEmpty { break }
             collected.append(contentsOf: items)
             if items.count < 30 { break }
+            // 次ページ取得前に小休止してレート制限を避ける
+            try? await Task.sleep(nanoseconds: interPageDelayNanos)
         }
         let volumes = SeriesVolumeFilter.allVolumes(from: collected, seriesName: trimmed)
         #if DEBUG
         print("[RakutenKobo] searchAllVolumes(\(trimmed)): collected=\(collected.count) volumes=\(volumes.count)")
         #endif
         return volumes
+    }
+
+    /// 1 ページを取得する。レート制限 (429) の場合は指数バックオフでリトライする
+    /// (末尾ページ超過などの 404/その他エラーはリトライせず throw)。
+    private func fetchPageWithRetry(appId: String, accessKey: String, title: String, page: Int) async throws -> [OpenBDParsedBook] {
+        var attempt = 0
+        while true {
+            do {
+                return try await request(
+                    queryItems: queryItems(appId: appId, accessKey: accessKey, title: title, hits: 30, page: page)
+                )
+            } catch RakutenKoboError.rateLimited {
+                guard attempt < maxRetriesOnRateLimit else { throw RakutenKoboError.rateLimited }
+                attempt += 1
+                let backoffNanos = UInt64(Double(1 << attempt) * 0.5 * 1_000_000_000) // 1.0, 2.0, 4.0, 8.0s
+                #if DEBUG
+                print("[RakutenKobo] page \(page) rate limited, retry \(attempt)/\(maxRetriesOnRateLimit)")
+                #endif
+                try? await Task.sleep(nanoseconds: backoffNanos)
+            }
+        }
     }
 
     // MARK: - Private

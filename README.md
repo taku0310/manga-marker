@@ -216,6 +216,7 @@ let candidates = try await bookSearch.searchSeries("ワンピース")
 - 集約・全巻照合のキーには `OpenBDParsedBook.seriesTitle` を使う。API の `series` フィールドが空の場合は **タイトルから巻数表記を除去 (`BookMetadataParser.stripVolumeSuffix`)** してクリーンなシリーズ名を導出する。これにより `series` 未提供の作品でも「全巻」ではなく「代表のみ」になってしまう取りこぼしを防ぐ。
 - 結果行の「＋」を押すと `searchAllVolumes(seriesName:)` でそのシリーズの全巻をページネーション取得し、`volumes` テーブルへ一括登録する (取得失敗時は代表のみ登録)。全巻取得は楽天Kobo / Google Books それぞれ最大 6 ページ (最大 180〜240 巻)。
 - **ページネーションの打ち切り**: 楽天 API は最終ページの次を要求すると 404/`not_found` を返すため、各ページの取得エラーは throw せず「打ち切り」として扱い、それまでに集めた巻を活かす。これをしないと最後のページのエラーで全巻が破棄され「代表のみ登録」になる。DEBUG ビルドでは `searchAllVolumes(...): collected=X volumes=Y` を出力して取得・抽出件数を確認できる。
+- **レート制限対策 (歯抜け防止)**: 楽天はおよそ 1 req/秒の制限があり、連続ページ取得で `HTTP 429` が返ると途中のページが欠落して巻が歯抜けになる。対策として **(1) ページ間にウェイト (楽天 0.8s / Google 0.3s) を挿入**し、**(2) 429 は打ち切らず指数バックオフ (1→2→4→8s) で最大 4 回リトライ**する。404 等の末尾超過のみ打ち切り、と区別している。Kobo の検索結果は巻順とは限らないため、全ページを取得し `SeriesVolumeFilter.allVolumes` が巻数で重複排除・整列することで全巻を揃える。
 
 ### 4-4. 新刊検出 (`Services/NewReleaseChecker.swift`)
 

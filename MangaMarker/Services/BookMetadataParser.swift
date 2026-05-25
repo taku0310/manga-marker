@@ -23,6 +23,27 @@ enum BookMetadataParser {
         return nil
     }
 
+    /// タイトル末尾の巻数表記 (「 23」「第23巻」「(23)」「vol.23」等) を除去してシリーズ名を得る。
+    /// 例: "鬼滅の刃 23" → "鬼滅の刃" / "20世紀少年 3" → "20世紀少年" / "AKIRA" → "AKIRA"
+    static func stripVolumeSuffix(from title: String) -> String {
+        let patterns = [
+            "\\s*第?\\s*\\d+\\s*巻\\s*$",
+            "\\s*\\(\\d+\\)\\s*$",
+            "\\s+vol\\.?\\s*\\d+\\s*$",
+            "\\s+\\d+\\s*$"
+        ]
+        for pattern in patterns {
+            guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { continue }
+            let range = NSRange(title.startIndex..., in: title)
+            let stripped = regex.stringByReplacingMatches(in: title, range: range, withTemplate: "")
+                .trimmingCharacters(in: .whitespaces)
+            if stripped != title, !stripped.isEmpty {
+                return stripped
+            }
+        }
+        return title.trimmingCharacters(in: .whitespaces)
+    }
+
     /// OpenBD の `pubdate` 形式 (yyyyMMdd 等) を Date に変換。
     static func parseOpenBDDate(_ raw: String?) -> Date? {
         guard let raw, !raw.isEmpty else { return nil }

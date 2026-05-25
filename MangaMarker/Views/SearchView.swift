@@ -80,8 +80,8 @@ private struct SearchResultRow: View {
     let isAdding: Bool
     let onAdd: () -> Void
 
-    /// シリーズ名を優先表示 (巻数は検索結果に表示しない)。
-    private var displayTitle: String { book.series ?? book.title }
+    /// シリーズ名を表示 (巻数は検索結果に表示しない)。
+    private var displayTitle: String { book.seriesTitle }
 
     var body: some View {
         HStack(spacing: 12) {

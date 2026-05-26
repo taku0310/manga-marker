@@ -42,15 +42,20 @@ enum BookMetadataParser {
         return nil
     }
 
-    /// タイトル末尾の巻数表記 (「 23」「第23巻」「(23)」「vol.23」「（４）」等) を除去してシリーズ名を得る。
-    /// 例: "鬼滅の刃 23" → "鬼滅の刃" / "あくたの死に際（４）" → "あくたの死に際" / "AKIRA" → "AKIRA"
+    /// タイトル末尾の巻数表記 (「 23」「第23巻」「(23)」「vol.23」「（４）」「上巻」「(下)」「前編」等) を
+    /// 除去してシリーズ名を得る。
+    /// 例: "鬼滅の刃 23" → "鬼滅の刃" / "あくたの死に際（４）" → "あくたの死に際" / "ひゃくえむ。新装版 上" → "ひゃくえむ。新装版"
     static func stripVolumeSuffix(from title: String) -> String {
         let normalized = normalizeWidth(title)
         let patterns = [
             "\\s*第?\\s*\\d+\\s*巻\\s*$",
             "\\s*\\(\\d+\\)\\s*$",
             "\\s+vol\\.?\\s*\\d+\\s*$",
-            "\\s+\\d+\\s*$"
+            "\\s+\\d+\\s*$",
+            "\\s*[上中下]巻\\s*$",
+            "\\s*\\([上中下]\\)\\s*$",
+            "\\s+[上中下]\\s*$",
+            "\\s*(?:前|後)編\\s*$"
         ]
         for pattern in patterns {
             guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { continue }
@@ -62,6 +67,23 @@ enum BookMetadataParser {
             }
         }
         return normalized.trimmingCharacters(in: .whitespaces)
+    }
+
+    /// 上/中/下・前/後編 を巻の順序として返す (上・前=0, 中=1, 下・後=2)。数字巻が無い分冊作品用。
+    /// 単独の漢字を誤検出しないよう「○巻」「(○)」「末尾の単独 上/中/下」「前編/後編」に限定する。
+    static func volumeOrdinal(from title: String?) -> Int? {
+        guard let title else { return nil }
+        let s = normalizeWidth(title)
+        func matches(_ patterns: [String]) -> Bool {
+            patterns.contains { pattern in
+                guard let regex = try? NSRegularExpression(pattern: pattern) else { return false }
+                return regex.firstMatch(in: s, range: NSRange(s.startIndex..., in: s)) != nil
+            }
+        }
+        if matches(["上巻", "\\(上\\)", "\\s上\\s*$", "前編"]) { return 0 }
+        if matches(["中巻", "\\(中\\)", "\\s中\\s*$"]) { return 1 }
+        if matches(["下巻", "\\(下\\)", "\\s下\\s*$", "後編"]) { return 2 }
+        return nil
     }
 
     /// OpenBD の `pubdate` 形式 (yyyyMMdd 等) を Date に変換。

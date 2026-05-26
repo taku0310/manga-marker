@@ -69,9 +69,19 @@ enum SeriesVolumeFilter {
                 byVolume[v] = book
             }
         }
-        let numbered = byVolume.values.sorted { ($0.volumeNumber ?? 0) < ($1.volumeNumber ?? 0) }
-        // 巻数付きが取れなければ単巻作品とみなして無番号の結果を返す
-        return numbered.isEmpty ? unnumbered : numbered
+
+        // 巻数が一つも取れなければ単巻作品とみなして無番号の結果を返す。
+        if byVolume.isEmpty { return unnumbered }
+
+        // 1 巻のタイトルに巻数が付かない作品 (例: "ワンナイト・モーニング" = 1巻、以降 "... 2".."15") に対応。
+        // 無番号のうち「タイトルがシリーズ名と完全一致＝実質1巻」を、1 巻が欠けていれば補完する
+        // (ガイドブック等の余分な語が付くものは対象外なので誤登録しない)。
+        if byVolume[1] == nil,
+           let baseVolume = unnumbered.first(where: { BookMetadataParser.normalizeTitle($0.seriesTitle) == target }) {
+            byVolume[1] = baseVolume.withVolumeNumber(1)
+        }
+
+        return byVolume.values.sorted { ($0.volumeNumber ?? 0) < ($1.volumeNumber ?? 0) }
     }
 
     /// 検索結果をシリーズ単位に集約し、代表として最小巻 (通常 1 巻) を 1 件ずつ返す。表示順は初出順。

@@ -278,6 +278,28 @@ final class SeriesVolumeFilterTests: XCTestCase {
         XCTAssertEqual(volumes.map(\.volumeNumber), [1, 2, 3])
     }
 
+    func test_allVolumes_recoversUnnumberedFirstVolume() {
+        // 1 巻がタイトルに巻数を持たない作品 (例: "ワンナイト・モーニング" = 1巻) を補完できること
+        let input = [
+            book("ワンナイト・モーニング", series: nil, volume: nil),
+            book("ワンナイト・モーニング 2", series: nil, volume: 2),
+            book("ワンナイト・モーニング 3", series: nil, volume: 3)
+        ]
+        let volumes = SeriesVolumeFilter.allVolumes(from: input, seriesName: "ワンナイト・モーニング")
+        XCTAssertEqual(volumes.map(\.volumeNumber), [1, 2, 3])
+    }
+
+    func test_allVolumes_dropsUnnumberedGuidebook() {
+        // 余分な語が付く無番号本 (ガイドブック等) は 1 巻補完の対象外
+        let input = [
+            book("ワンナイト・モーニング 公式ガイド", series: nil, volume: nil),
+            book("ワンナイト・モーニング 1", series: nil, volume: 1),
+            book("ワンナイト・モーニング 2", series: nil, volume: 2)
+        ]
+        let volumes = SeriesVolumeFilter.allVolumes(from: input, seriesName: "ワンナイト・モーニング")
+        XCTAssertEqual(volumes.map(\.volumeNumber), [1, 2])
+    }
+
     func test_allVolumes_dedupByVolumeNumber_preferISBN_sortedAscending() {
         let input = [
             book("鬼滅の刃 2", series: "鬼滅の刃", volume: 2, isbn: nil),

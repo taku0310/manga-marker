@@ -105,4 +105,18 @@ struct OpenBDParsedBook: Hashable, Identifiable {
         if let series, !series.isEmpty { return series }
         return BookMetadataParser.stripVolumeSuffix(from: title)
     }
+
+    /// 巻数を補完したコピーを返す (タイトルに巻数が無い 1 巻などの補正用)。
+    func withVolumeNumber(_ number: Int) -> OpenBDParsedBook {
+        OpenBDParsedBook(
+            isbn: isbn,
+            title: title,
+            series: series,
+            volumeNumber: number,
+            author: author,
+            publisher: publisher,
+            coverImageURL: coverImageURL,
+            publishedAt: publishedAt
+        )
+    }
 }

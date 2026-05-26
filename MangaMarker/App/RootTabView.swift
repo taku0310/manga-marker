@@ -7,7 +7,10 @@ struct RootTabView: View {
         TabView {
             NavigationStack {
                 MangaListView(
-                    viewModel: MangaListViewModel(repository: deps.repository)
+                    viewModel: MangaListViewModel(
+                        repository: deps.repository,
+                        newReleaseChecker: deps.newReleaseChecker
+                    )
                 )
             }
             .tabItem {

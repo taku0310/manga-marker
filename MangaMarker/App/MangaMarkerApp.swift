@@ -14,8 +14,9 @@ struct MangaMarkerApp: App {
             RootTabView()
                 .environmentObject(dependencies)
                 .task {
+                    // 新刊チェックはライブラリ表示時 / タイトルを開いたタイミングで行う
+                    // (起動時の全件チェックは登録数が多いと重いため廃止)。
                     await dependencies.notificationService.requestAuthorization()
-                    await dependencies.newReleaseChecker.checkAll()
                 }
         }
     }

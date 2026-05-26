@@ -7,13 +7,31 @@ final class MangaDetailViewModel: ObservableObject {
     @Published var isAddingVolume: Bool = false
     @Published var errorMessage: String?
 
+    @Published private(set) var isCheckingNewReleases = false
+
     private let repository: MangaRepository
     private let openBDService: OpenBDService
+    private let newReleaseChecker: NewReleaseChecker
 
-    init(manga: Manga, repository: MangaRepository, openBDService: OpenBDService) {
+    init(manga: Manga,
+         repository: MangaRepository,
+         openBDService: OpenBDService,
+         newReleaseChecker: NewReleaseChecker) {
         self.manga = manga
         self.repository = repository
         self.openBDService = openBDService
+        self.newReleaseChecker = newReleaseChecker
+    }
+
+    /// 詳細表示時にこのシリーズだけ新刊チェックする (タイトルを開いたタイミングでの更新)。
+    /// 再チェック間隔内ならスキップされるため、開く度に API を叩かない。
+    func checkNewReleasesOnAppear() async {
+        reload()
+        isCheckingNewReleases = true
+        defer { isCheckingNewReleases = false }
+        if await newReleaseChecker.check(manga: manga) {
+            reload()
+        }
     }
 
     var nextUnreadVolume: Volume? {

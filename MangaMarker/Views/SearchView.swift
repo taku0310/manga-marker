@@ -35,7 +35,8 @@ struct SearchView: View {
                 viewModel: MangaDetailViewModel(
                     manga: manga,
                     repository: deps.repository,
-                    openBDService: deps.openBDService
+                    openBDService: deps.openBDService,
+                    newReleaseChecker: deps.newReleaseChecker
                 )
             )
         }

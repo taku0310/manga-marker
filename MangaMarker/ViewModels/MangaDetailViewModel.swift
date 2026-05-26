@@ -73,6 +73,12 @@ final class MangaDetailViewModel: ObservableObject {
         reload()
     }
 
+    /// 既読状況をリセットする。全巻が未読になり「次に読む」は 1 巻に戻る。
+    func resetReadStatus() {
+        repository.resetReadStatus(mangaId: manga.id)
+        reload()
+    }
+
     func addEmptyVolume() {
         let next = (volumes.map(\.volumeNumber).max() ?? 0) + 1
         repository.upsertVolume(

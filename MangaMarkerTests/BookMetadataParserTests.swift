@@ -28,6 +28,17 @@ final class BookMetadataParserTests: XCTestCase {
         XCTAssertEqual(BookMetadataParser.extractVolumeNumber(from: "鬼滅の刃　第１２巻"), 12)
     }
 
+    func test_volumeOrdinal() {
+        XCTAssertEqual(BookMetadataParser.volumeOrdinal(from: "ひゃくえむ。新装版 上"), 0)
+        XCTAssertEqual(BookMetadataParser.volumeOrdinal(from: "作品名（中）"), 1)
+        XCTAssertEqual(BookMetadataParser.volumeOrdinal(from: "作品名 下巻"), 2)
+        XCTAssertEqual(BookMetadataParser.volumeOrdinal(from: "作品名 前編"), 0)
+        XCTAssertEqual(BookMetadataParser.volumeOrdinal(from: "作品名 後編"), 2)
+        // 単独漢字の誤検出はしない
+        XCTAssertNil(BookMetadataParser.volumeOrdinal(from: "史上最強の弟子"))
+        XCTAssertNil(BookMetadataParser.volumeOrdinal(from: "鬼滅の刃 3"))
+    }
+
     func test_normalizeWidth_keepsJapanese() {
         // カタカナ・漢字・ひらがなは変換しない、ASCII 全角のみ半角化
         XCTAssertEqual(BookMetadataParser.normalizeWidth("あくたの死に際（４）"), "あくたの死に際(4)")
@@ -286,6 +297,28 @@ final class SeriesVolumeFilterTests: XCTestCase {
             book("ワンナイト・モーニング 3", series: nil, volume: 3)
         ]
         let volumes = SeriesVolumeFilter.allVolumes(from: input, seriesName: "ワンナイト・モーニング")
+        XCTAssertEqual(volumes.map(\.volumeNumber), [1, 2, 3])
+    }
+
+    func test_allVolumes_assignsKanjiOrdinalVolumes_jokanGekan() {
+        // 上巻・下巻の 2 分冊 → 1, 2 巻に割り当て
+        let input = [
+            book("ひゃくえむ。新装版 下", series: "ひゃくえむ。新装版", volume: nil),
+            book("ひゃくえむ。新装版 上", series: "ひゃくえむ。新装版", volume: nil)
+        ]
+        let volumes = SeriesVolumeFilter.allVolumes(from: input, seriesName: "ひゃくえむ。新装版")
+        XCTAssertEqual(volumes.map(\.volumeNumber), [1, 2])
+        XCTAssertTrue(volumes.first?.title.contains("上") ?? false)
+    }
+
+    func test_allVolumes_assignsKanjiOrdinalVolumes_jouchuuge() {
+        // 上・中・下の 3 分冊 → 1, 2, 3 巻に割り当て
+        let input = [
+            book("作品名（下）", series: "作品名", volume: nil),
+            book("作品名（上）", series: "作品名", volume: nil),
+            book("作品名（中）", series: "作品名", volume: nil)
+        ]
+        let volumes = SeriesVolumeFilter.allVolumes(from: input, seriesName: "作品名")
         XCTAssertEqual(volumes.map(\.volumeNumber), [1, 2, 3])
     }
 

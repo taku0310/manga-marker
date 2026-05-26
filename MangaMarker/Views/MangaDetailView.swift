@@ -4,6 +4,7 @@ struct MangaDetailView: View {
     @StateObject var viewModel: MangaDetailViewModel
     @State private var showingAddByISBN = false
     @State private var inputISBN = ""
+    @State private var showingResetConfirm = false
 
     var body: some View {
         List {
@@ -56,6 +57,11 @@ struct MangaDetailView: View {
                         Label(viewModel.manga.isCompleted ? "完結を解除" : "完結としてマーク",
                               systemImage: viewModel.manga.isCompleted ? "arrow.uturn.backward" : "checkmark.seal")
                     }
+                    Button(role: .destructive) {
+                        showingResetConfirm = true
+                    } label: {
+                        Label("既読状況をリセット", systemImage: "arrow.counterclockwise")
+                    }
                 } label: {
                     Image(systemName: "ellipsis.circle")
                 }
@@ -70,6 +76,12 @@ struct MangaDetailView: View {
                 Task { await viewModel.addVolume(byISBN: code) }
             }
             Button("キャンセル", role: .cancel) { inputISBN = "" }
+        }
+        .confirmationDialog("既読状況をリセットしますか？", isPresented: $showingResetConfirm, titleVisibility: .visible) {
+            Button("リセット", role: .destructive) { viewModel.resetReadStatus() }
+            Button("キャンセル", role: .cancel) {}
+        } message: {
+            Text("すべての巻が未読に戻り、「次に読む」が1巻に戻ります。")
         }
         .alert("エラー", isPresented: .constant(viewModel.errorMessage != nil)) {
             Button("OK") { viewModel.errorMessage = nil }

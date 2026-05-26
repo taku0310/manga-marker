@@ -199,6 +199,17 @@ final class MangaRepository {
         }
     }
 
+    /// 指定シリーズの全巻を未読に戻す。
+    func resetReadStatus(mangaId: Int64) {
+        db.sync {
+            var stmt: OpaquePointer?
+            sqlite3_prepare_v2(db.db, "UPDATE volumes SET is_read = 0, read_at = NULL WHERE manga_id = ?;", -1, &stmt, nil)
+            sqlite3_bind_int64(stmt, 1, mangaId)
+            sqlite3_step(stmt)
+            sqlite3_finalize(stmt)
+        }
+    }
+
     func deleteVolume(id: Int64) {
         db.sync {
             var stmt: OpaquePointer?

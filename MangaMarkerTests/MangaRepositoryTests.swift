@@ -45,4 +45,22 @@ final class MangaRepositoryTests: XCTestCase {
         XCTAssertEqual(volumes.first?.isRead, true)
         repository.deleteManga(id: mangaId)
     }
+
+    func test_resetReadStatus() {
+        let mangaId = repository.upsertManga(
+            title: "リセットテスト", author: "", publisher: nil, coverImageURL: nil, totalVolumes: nil
+        )!
+        for n in 1...3 {
+            let vid = repository.upsertVolume(mangaId: mangaId, volumeNumber: n, isbn: nil, title: nil, coverImageURL: nil, publishedAt: nil)!
+            repository.setVolumeRead(id: vid, read: true)
+        }
+        XCTAssertEqual(repository.fetchVolumes(mangaId: mangaId).filter(\.isRead).count, 3)
+
+        repository.resetReadStatus(mangaId: mangaId)
+        let volumes = repository.fetchVolumes(mangaId: mangaId)
+        XCTAssertTrue(volumes.allSatisfy { !$0.isRead && $0.readAt == nil })
+        // 「次に読む」は最小巻 (1巻) に戻る
+        XCTAssertEqual(volumes.first(where: { !$0.isRead })?.volumeNumber, 1)
+        repository.deleteManga(id: mangaId)
+    }
 }

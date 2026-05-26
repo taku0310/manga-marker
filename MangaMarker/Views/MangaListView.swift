@@ -37,16 +37,19 @@ struct MangaListView: View {
                 viewModel: MangaDetailViewModel(
                     manga: manga,
                     repository: deps.repository,
-                    openBDService: deps.openBDService
+                    openBDService: deps.openBDService,
+                    newReleaseChecker: deps.newReleaseChecker
                 )
             )
         }
-        .onAppear { viewModel.reload() }
-        .refreshable {
-            viewModel.reload()
-            await deps.newReleaseChecker.checkAll()
-            viewModel.reload()
+        .overlay(alignment: .top) {
+            if viewModel.isCheckingNewReleases {
+                NewReleaseCheckingBanner()
+            }
         }
+        .onAppear { viewModel.reload() }
+        .task { await viewModel.autoCheckNewReleases() }
+        .refreshable { await viewModel.refreshAllNewReleases() }
     }
 }
 
@@ -57,5 +60,21 @@ private struct EmptyLibraryView: View {
         } description: {
             Text("「検索」タブから漫画を追加できます")
         }
+    }
+}
+
+private struct NewReleaseCheckingBanner: View {
+    var body: some View {
+        HStack(spacing: 8) {
+            ProgressView()
+            Text("新刊を確認中…")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(.ultraThinMaterial, in: Capsule())
+        .padding(.top, 4)
+        .transition(.move(edge: .top).combined(with: .opacity))
     }
 }

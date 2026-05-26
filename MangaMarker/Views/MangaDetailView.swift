@@ -77,6 +77,7 @@ struct MangaDetailView: View {
             Text(viewModel.errorMessage ?? "")
         }
         .onAppear { viewModel.reload() }
+        .task { await viewModel.checkNewReleasesOnAppear() }
     }
 
     private var header: some View {
@@ -92,6 +93,12 @@ struct MangaDetailView: View {
                 Text("\(viewModel.readCount) / \(viewModel.totalCount) 巻 読了")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                if viewModel.isCheckingNewReleases {
+                    HStack(spacing: 6) {
+                        ProgressView()
+                        Text("新刊を確認中…").font(.caption2).foregroundStyle(.secondary)
+                    }
+                }
             }
         }
         .padding(.vertical, 4)

@@ -14,6 +14,10 @@ final class NewReleaseChecker {
     private let bookSearchService: BookSearchService
     private let notificationService: NotificationService
 
+    private let defaults = UserDefaults.standard
+    /// 同一シリーズの再チェック間隔。短時間に何度も画面を開いても API を叩きすぎないようにする。
+    private let minCheckInterval: TimeInterval = 6 * 60 * 60 // 6h
+
     init(repository: MangaRepository,
          openBDService: OpenBDService,
          bookSearchService: BookSearchService,
@@ -24,14 +28,25 @@ final class NewReleaseChecker {
         self.notificationService = notificationService
     }
 
-    func checkAll() async {
+    /// 最終チェック時刻 (UNIX time)。未チェックは 0。最も古いものから処理する並べ替えに使う。
+    func lastChecked(_ mangaId: Int64) -> TimeInterval {
+        defaults.double(forKey: lastCheckedKey(mangaId))
+    }
+
+    func checkAll(force: Bool = false) async {
         let mangas = repository.fetchAllManga().filter { !$0.isCompleted }
         for manga in mangas {
-            await check(manga: manga)
+            await check(manga: manga, force: force)
         }
     }
 
-    func check(manga: Manga) async {
+    /// 指定シリーズの新刊をチェックする。
+    /// - Parameter force: true で再チェック間隔を無視して必ず実行 (Pull to Refresh 等)。
+    /// - Returns: 実際にチェックを行ったら true (間隔内でスキップした場合は false)。
+    @discardableResult
+    func check(manga: Manga, force: Bool = false) async -> Bool {
+        guard force || isStale(manga.id) else { return false }
+
         let volumes = repository.fetchVolumes(mangaId: manga.id)
 
         // Strategy 1: オンライン書誌検索 (楽天Kobo → Google Books フォールバック)
@@ -39,7 +54,8 @@ final class NewReleaseChecker {
             let books = try await bookSearchService.searchSeries(manga.title)
             if !books.isEmpty {
                 await process(candidates: books, manga: manga, volumes: volumes)
-                return
+                markChecked(manga.id)
+                return true
             }
         } catch {
             print("Series search failed for \(manga.title): \(error)")
@@ -47,7 +63,22 @@ final class NewReleaseChecker {
 
         // Strategy 2: OpenBD ISBN 近傍
         await fallbackByISBNNeighborhood(manga: manga, volumes: volumes)
+        markChecked(manga.id)
+        return true
     }
+
+    // MARK: - Throttle
+
+    private func isStale(_ mangaId: Int64) -> Bool {
+        let last = lastChecked(mangaId)
+        return last == 0 || Date().timeIntervalSince1970 - last >= minCheckInterval
+    }
+
+    private func markChecked(_ mangaId: Int64) {
+        defaults.set(Date().timeIntervalSince1970, forKey: lastCheckedKey(mangaId))
+    }
+
+    private func lastCheckedKey(_ mangaId: Int64) -> String { "newrelease.lastChecked.\(mangaId)" }
 
     // MARK: - Strategies
 

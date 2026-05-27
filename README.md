@@ -229,7 +229,8 @@ let candidates = try await bookSearch.searchSeries("ワンピース")
 
 採用時は `volumes` テーブルへ自動登録 + `UNCalendarNotificationTrigger` でローカル通知を予約 + `notifications_log` で冪等性を担保。ISBN が無いソースでは `OpenBDParsedBook.id` (タイトル+著者+巻数) を冪等キーに使用。
 
-同一シリーズ判定は `BookMetadataParser.normalizeTitle` (空白除去 + 小文字化 + `・` 除去) を用いた双方向部分一致。既知巻数と重複するもの (廉価版・愛蔵版など) は除外する。
+同一シリーズ判定は `SeriesVolumeFilter.isSameSeries` に集約し、`normalizeTitle` (全角→半角・空白除去・小文字化・`・` 除去) 後の **完全一致** で行う。部分一致だと「ドラゴン桜」⇄「ドラゴン桜2」、「ナニワ金融道」⇄「新ナニワ金融道」、「バーサス」⇄「デュエル・マスターズ VS（バーサス）」のように続編/別シリーズが混入するため。
+さらに **単話・分冊・小説・ノベライズ・「第N話」は単行本以外として除外** (`BookMetadataParser.isNonTankobon`) し、チ。の単話 (9〜63) や小説版が巻として混ざらないようにする。既知巻数と重複するもの (廉価版・愛蔵版など) も除外する。
 
 #### チェックのタイミング (処理時間を考慮した設計)
 

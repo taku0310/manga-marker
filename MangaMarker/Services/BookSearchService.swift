@@ -55,9 +55,12 @@ final class CompositeBookSearchService: BookSearchService, @unchecked Sendable {
 /// シリーズ検索結果のフィルタ/集約ユーティリティ。
 enum SeriesVolumeFilter {
     /// 検索結果から該当シリーズの巻のみを抽出し、巻数で重複排除 (ISBN 持ちを優先) して昇順に返す。
+    /// シリーズ名は完全一致で判定し (続編・別シリーズの混入防止)、単話/小説等は除外する。
     static func allVolumes(from books: [OpenBDParsedBook], seriesName: String) -> [OpenBDParsedBook] {
         let target = BookMetadataParser.normalizeTitle(seriesName)
-        let filtered = books.filter { matchesSeries($0, target: target) }
+        let filtered = books.filter {
+            matchesSeries($0, target: target) && !BookMetadataParser.isNonTankobon(title: $0.title)
+        }
 
         var byVolume: [Int: OpenBDParsedBook] = [:]
         var unnumbered: [OpenBDParsedBook] = []
@@ -108,10 +111,12 @@ enum SeriesVolumeFilter {
     }
 
     /// 検索結果をシリーズ単位に集約し、代表として最小巻 (通常 1 巻) を 1 件ずつ返す。表示順は初出順。
+    /// 単話/小説等の単行本以外は除外する。
     static func representatives(from books: [OpenBDParsedBook]) -> [OpenBDParsedBook] {
         var groups: [String: OpenBDParsedBook] = [:]
         var order: [String] = []
         for book in books {
+            if BookMetadataParser.isNonTankobon(title: book.title) { continue }
             let key = BookMetadataParser.normalizeTitle(book.seriesTitle)
             if let existing = groups[key] {
                 if (book.volumeNumber ?? Int.max) < (existing.volumeNumber ?? Int.max) {
@@ -125,14 +130,14 @@ enum SeriesVolumeFilter {
         return order.compactMap { groups[$0] }
     }
 
-    /// 書籍が指定シリーズ名と同一シリーズかを判定する (正規化後の双方向部分一致)。
-    /// シリーズ判定ロジックの唯一の入口 (NewReleaseChecker / 各 Service から共用)。
+    /// 書籍が指定シリーズ名と同一シリーズかを判定する (正規化後の完全一致)。
+    /// 部分一致だと「ドラゴン桜」⇄「ドラゴン桜2」や「ナニワ金融道」⇄「新ナニワ金融道」が
+    /// 混入するため、完全一致にしている。シリーズ判定の唯一の入口。
     static func isSameSeries(_ book: OpenBDParsedBook, seriesName: String) -> Bool {
         matchesSeries(book, target: BookMetadataParser.normalizeTitle(seriesName))
     }
 
     private static func matchesSeries(_ book: OpenBDParsedBook, target: String) -> Bool {
-        let normalized = BookMetadataParser.normalizeTitle(book.seriesTitle)
-        return normalized.contains(target) || target.contains(normalized)
+        BookMetadataParser.normalizeTitle(book.seriesTitle) == target
     }
 }

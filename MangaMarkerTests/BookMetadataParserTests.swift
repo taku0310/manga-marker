@@ -148,8 +148,9 @@ final class RakutenKoboDecodingTests: XCTestCase {
         let parsed = response.items.compactMap(\.toParsedBook)
         XCTAssertEqual(parsed.count, 1)
         let book = try XCTUnwrap(parsed.first)
-        // ISBN が無いため itemNumber が識別子に使われる
-        XCTAssertEqual(book.isbn, "kobo-12345")
+        // ISBN が無い Kobo 本は isbn=nil。id はタイトル+著者+巻数で安定化される。
+        XCTAssertNil(book.isbn)
+        XCTAssertFalse(book.id.isEmpty)
         XCTAssertEqual(book.series, "鬼滅の刃")
         XCTAssertEqual(book.volumeNumber, 23)
         XCTAssertTrue(book.coverImageURL?.hasPrefix("https://") ?? false)
@@ -178,7 +179,7 @@ final class RakutenKoboDecodingTests: XCTestCase {
         let response = try JSONDecoder().decode(RakutenKoboResponse.self, from: json)
         let parsed = response.items.compactMap(\.toParsedBook)
         XCTAssertEqual(parsed.count, 1)
-        XCTAssertEqual(parsed.first?.isbn, "kobo-99999")
+        XCTAssertNil(parsed.first?.isbn)
         XCTAssertEqual(parsed.first?.volumeNumber, 100)
     }
 

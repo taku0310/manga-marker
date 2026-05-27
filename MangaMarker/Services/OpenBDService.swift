@@ -16,7 +16,7 @@ enum OpenBDError: LocalizedError {
     }
 }
 
-final class OpenBDService {
+final class OpenBDService: @unchecked Sendable {
     private let session: URLSession
     private let baseURL = URL(string: "https://api.openbd.jp/v1")!
 

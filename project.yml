@@ -15,6 +15,12 @@ settings:
     GENERATE_INFOPLIST_FILE: NO
     DEVELOPMENT_TEAM: ""
     CODE_SIGN_STYLE: Automatic
+    # API キーの既定値 (空)。実キーはリポジトリに含めない。
+    # ローカルで実キーを使うには Secrets.xcconfig (gitignore 済) を作成し、
+    # configFiles で読み込むか Xcode の Build Settings で上書きする (README 参照)。
+    GOOGLE_BOOKS_API_KEY: ""
+    RAKUTEN_APP_ID: ""
+    RAKUTEN_ACCESS_KEY: ""
 
 targets:
   MangaMarker:
@@ -24,6 +30,7 @@ targets:
       - path: MangaMarker
         excludes:
           - "App/Info.plist"
+          - "App/PrivacyInfo.xcprivacy"
       # Info.plist は XcodeGen に生成させず、INFOPLIST_FILE で参照のみ。
       # (info: ディレクティブを使うと xcodegen generate 実行時に上書きされ、
       #  RakutenAppId 等の手書きキーが消えるため、ここでは buildPhase: none で
@@ -32,6 +39,7 @@ targets:
         buildPhase: none
     resources:
       - path: MangaMarker/Resources/Assets.xcassets
+      - path: MangaMarker/App/PrivacyInfo.xcprivacy
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.example.MangaMarker

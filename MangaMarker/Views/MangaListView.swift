@@ -1,8 +1,14 @@
 import SwiftUI
 
 struct MangaListView: View {
-    @StateObject var viewModel: MangaListViewModel
+    @StateObject private var viewModel: MangaListViewModel
     @EnvironmentObject private var deps: AppDependencies
+
+    @MainActor
+    init(deps: AppDependencies) {
+        // StateObject(wrappedValue:) は autoclosure のため初回のみ評価される (再生成されない)。
+        _viewModel = StateObject(wrappedValue: deps.makeMangaListViewModel())
+    }
 
     var body: some View {
         Group {
@@ -33,14 +39,7 @@ struct MangaListView: View {
             }
         }
         .navigationDestination(for: Manga.self) { manga in
-            MangaDetailView(
-                viewModel: MangaDetailViewModel(
-                    manga: manga,
-                    repository: deps.repository,
-                    openBDService: deps.openBDService,
-                    newReleaseChecker: deps.newReleaseChecker
-                )
-            )
+            MangaDetailView(deps: deps, manga: manga)
         }
         .overlay(alignment: .top) {
             if viewModel.isCheckingNewReleases {

@@ -21,7 +21,7 @@ extension BookSearchService {
 
 /// primary を先に試し、結果が空 or エラーなら fallback に切り替える複合サービス。
 /// 例: 楽天Kobo (primary) → Google Books (fallback)。
-final class CompositeBookSearchService: BookSearchService {
+final class CompositeBookSearchService: BookSearchService, @unchecked Sendable {
     private let primary: BookSearchService
     private let fallback: BookSearchService
 
@@ -123,6 +123,12 @@ enum SeriesVolumeFilter {
             }
         }
         return order.compactMap { groups[$0] }
+    }
+
+    /// 書籍が指定シリーズ名と同一シリーズかを判定する (正規化後の双方向部分一致)。
+    /// シリーズ判定ロジックの唯一の入口 (NewReleaseChecker / 各 Service から共用)。
+    static func isSameSeries(_ book: OpenBDParsedBook, seriesName: String) -> Bool {
+        matchesSeries(book, target: BookMetadataParser.normalizeTitle(seriesName))
     }
 
     private static func matchesSeries(_ book: OpenBDParsedBook, target: String) -> Bool {

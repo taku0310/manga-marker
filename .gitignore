@@ -26,3 +26,6 @@ fastlane/test_output
 
 # Generated Xcode project (regenerable via `xcodegen generate`)
 MangaMarker.xcodeproj/
+
+# API シークレット (実キーはコミットしない。テンプレートは Secrets.example.xcconfig)
+Secrets.xcconfig

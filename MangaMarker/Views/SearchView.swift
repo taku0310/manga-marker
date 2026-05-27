@@ -1,10 +1,15 @@
 import SwiftUI
 
 struct SearchView: View {
-    @StateObject var viewModel: SearchViewModel
+    @StateObject private var viewModel: SearchViewModel
     @EnvironmentObject private var deps: AppDependencies
     @State private var navigateManga: Manga?
     @FocusState private var inputFocused: Bool
+
+    @MainActor
+    init(deps: AppDependencies) {
+        _viewModel = StateObject(wrappedValue: deps.makeSearchViewModel())
+    }
 
     var body: some View {
         VStack(spacing: 12) {
@@ -25,20 +30,16 @@ struct SearchView: View {
         }
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.hidden, for: .navigationBar)
-        .alert("エラー", isPresented: .constant(viewModel.errorMessage != nil)) {
-            Button("OK") { viewModel.errorMessage = nil }
+        .alert("エラー", isPresented: Binding(
+            get: { viewModel.errorMessage != nil },
+            set: { if !$0 { viewModel.errorMessage = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
         } message: {
             Text(viewModel.errorMessage ?? "")
         }
         .navigationDestination(item: $navigateManga) { manga in
-            MangaDetailView(
-                viewModel: MangaDetailViewModel(
-                    manga: manga,
-                    repository: deps.repository,
-                    openBDService: deps.openBDService,
-                    newReleaseChecker: deps.newReleaseChecker
-                )
-            )
+            MangaDetailView(deps: deps, manga: manga)
         }
         .onAppear { inputFocused = true }
     }

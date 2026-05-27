@@ -1,8 +1,12 @@
 import Foundation
 import SQLite3
 
-final class MangaRepository {
+final class MangaRepository: @unchecked Sendable {
     private let db: DatabaseManager
+
+    // SELECT * を使わず明示カラムで読み出す (列順が readManga/readVolume の index と一致)。
+    private static let mangaColumns = "id, title, author, publisher, cover_image_url, total_volumes, is_completed, created_at, updated_at"
+    private static let volumeColumns = "id, manga_id, volume_number, isbn, title, cover_image_url, published_at, is_read, read_at, created_at"
 
     init(db: DatabaseManager) {
         self.db = db
@@ -82,7 +86,7 @@ final class MangaRepository {
         db.sync {
             var stmt: OpaquePointer?
             defer { sqlite3_finalize(stmt) }
-            guard sqlite3_prepare_v2(db.db, "SELECT * FROM manga WHERE id = ?;", -1, &stmt, nil) == SQLITE_OK else { return nil }
+            guard sqlite3_prepare_v2(db.db, "SELECT \(Self.mangaColumns) FROM manga WHERE id = ?;", -1, &stmt, nil) == SQLITE_OK else { return nil }
             sqlite3_bind_int64(stmt, 1, id)
             if sqlite3_step(stmt) == SQLITE_ROW { return readManga(stmt) }
             return nil
@@ -94,26 +98,42 @@ final class MangaRepository {
             var stmt: OpaquePointer?
             defer { sqlite3_finalize(stmt) }
             var result: [Manga] = []
-            guard sqlite3_prepare_v2(db.db, "SELECT * FROM manga ORDER BY updated_at DESC;", -1, &stmt, nil) == SQLITE_OK else { return result }
+            guard sqlite3_prepare_v2(db.db, "SELECT \(Self.mangaColumns) FROM manga ORDER BY updated_at DESC;", -1, &stmt, nil) == SQLITE_OK else { return result }
             while sqlite3_step(stmt) == SQLITE_ROW { result.append(readManga(stmt)) }
             return result
         }
     }
 
+    /// 一覧用に全シリーズと進捗をまとめて取得する。
+    /// N+1 を避けるため manga と volumes を **各 1 クエリ** で取得し、メモリ上で集計する。
     func fetchAllMangaWithProgress() -> [MangaWithProgress] {
         let mangas = fetchAllManga()
+        let volumesByManga = fetchAllVolumesGroupedByManga()
         return mangas.map { manga in
-            let volumes = fetchVolumes(mangaId: manga.id)
-            let read = volumes.filter { $0.isRead }.count
-            let next = volumes.first { !$0.isRead }
-            let latest = volumes.last
+            let volumes = volumesByManga[manga.id] ?? []
             return MangaWithProgress(
                 manga: manga,
-                readVolumeCount: read,
+                readVolumeCount: volumes.filter(\.isRead).count,
                 registeredVolumeCount: volumes.count,
-                nextUnreadVolume: next,
-                latestRegisteredVolume: latest
+                nextUnreadVolume: volumes.first { !$0.isRead },
+                latestRegisteredVolume: volumes.last
             )
+        }
+    }
+
+    /// 全 volumes を 1 クエリで取得し manga_id でグループ化する (各配列は volume_number 昇順)。
+    private func fetchAllVolumesGroupedByManga() -> [Int64: [Volume]] {
+        db.sync {
+            var stmt: OpaquePointer?
+            defer { sqlite3_finalize(stmt) }
+            var result: [Int64: [Volume]] = [:]
+            let sql = "SELECT \(Self.volumeColumns) FROM volumes ORDER BY manga_id ASC, volume_number ASC;"
+            guard sqlite3_prepare_v2(db.db, sql, -1, &stmt, nil) == SQLITE_OK else { return result }
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                let volume = readVolume(stmt)
+                result[volume.mangaId, default: []].append(volume)
+            }
+            return result
         }
     }
 
@@ -176,7 +196,7 @@ final class MangaRepository {
             var stmt: OpaquePointer?
             defer { sqlite3_finalize(stmt) }
             var result: [Volume] = []
-            guard sqlite3_prepare_v2(db.db, "SELECT * FROM volumes WHERE manga_id = ? ORDER BY volume_number ASC;", -1, &stmt, nil) == SQLITE_OK else { return result }
+            guard sqlite3_prepare_v2(db.db, "SELECT \(Self.volumeColumns) FROM volumes WHERE manga_id = ? ORDER BY volume_number ASC;", -1, &stmt, nil) == SQLITE_OK else { return result }
             sqlite3_bind_int64(stmt, 1, mangaId)
             while sqlite3_step(stmt) == SQLITE_ROW { result.append(readVolume(stmt)) }
             return result

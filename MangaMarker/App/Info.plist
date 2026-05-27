@@ -23,63 +23,24 @@
     <key>LSRequiresIPhoneOS</key>
     <true/>
     <key>GoogleBooksApiKey</key>
-    <string>YOUR_GOOGLE_BOOKS_API_KEY</string>
+    <string>$(GOOGLE_BOOKS_API_KEY)</string>
     <key>RakutenAppId</key>
-    <string>YOUR_RAKUTEN_APP_ID</string>
+    <string>$(RAKUTEN_APP_ID)</string>
     <key>RakutenAccessKey</key>
-    <string>YOUR_RAKUTEN_ACCESS_KEY</string>
-    <key>NSAppTransportSecurity</key>
-    <dict>
-        <key>NSAllowsArbitraryLoads</key>
-        <false/>
-        <key>NSExceptionDomains</key>
-        <dict>
-            <key>openbd.jp</key>
-            <dict>
-                <key>NSIncludesSubdomains</key>
-                <true/>
-                <key>NSExceptionAllowsInsecureHTTPLoads</key>
-                <false/>
-            </dict>
-            <key>rakuten.co.jp</key>
-            <dict>
-                <key>NSIncludesSubdomains</key>
-                <true/>
-                <key>NSExceptionAllowsInsecureHTTPLoads</key>
-                <false/>
-            </dict>
-            <key>googleapis.com</key>
-            <dict>
-                <key>NSIncludesSubdomains</key>
-                <true/>
-                <key>NSExceptionAllowsInsecureHTTPLoads</key>
-                <false/>
-            </dict>
-            <key>googleusercontent.com</key>
-            <dict>
-                <key>NSIncludesSubdomains</key>
-                <true/>
-                <key>NSExceptionAllowsInsecureHTTPLoads</key>
-                <false/>
-            </dict>
-            <key>google.com</key>
-            <dict>
-                <key>NSIncludesSubdomains</key>
-                <true/>
-                <key>NSExceptionAllowsInsecureHTTPLoads</key>
-                <false/>
-            </dict>
-        </dict>
-    </dict>
+    <string>$(RAKUTEN_ACCESS_KEY)</string>
+    <key>BGTaskSchedulerPermittedIdentifiers</key>
+    <array>
+        <string>com.example.MangaMarker.newReleaseRefresh</string>
+    </array>
+    <key>UIBackgroundModes</key>
+    <array>
+        <string>fetch</string>
+    </array>
     <key>UILaunchScreen</key>
     <dict>
         <key>UIColorName</key>
         <string>AccentColor</string>
     </dict>
-    <key>UIRequiredDeviceCapabilities</key>
-    <array>
-        <string>armv7</string>
-    </array>
     <key>UISupportedInterfaceOrientations</key>
     <array>
         <string>UIInterfaceOrientationPortrait</string>

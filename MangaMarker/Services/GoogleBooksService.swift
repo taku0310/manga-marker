@@ -34,7 +34,7 @@ enum GoogleBooksError: LocalizedError {
 /// - ISBN を含まない結果は `GoogleBook.toParsedBook` で除外される (DB 整合性のため)。
 ///
 /// https://developers.google.com/books/docs/v1/using
-final class GoogleBooksService: BookSearchService {
+final class GoogleBooksService: BookSearchService, @unchecked Sendable {
     private let session: URLSession
     private let baseURL = URL(string: "https://www.googleapis.com/books/v1/volumes")!
     private let apiKey: String?
@@ -66,14 +66,7 @@ final class GoogleBooksService: BookSearchService {
     /// シリーズ名から新刊候補を取得する。NewReleaseChecker 用。
     func searchSeries(_ seriesName: String, maxResults: Int = 30) async throws -> [OpenBDParsedBook] {
         let books = try await searchByTitle(seriesName, maxResults: maxResults)
-        let target = BookMetadataParser.normalizeTitle(seriesName)
-        return books.filter { book in
-            let candidates = [book.series, book.title].compactMap { $0 }
-            return candidates.contains { candidate in
-                let normalized = BookMetadataParser.normalizeTitle(candidate)
-                return normalized.contains(target) || target.contains(normalized)
-            }
-        }
+        return books.filter { SeriesVolumeFilter.isSameSeries($0, seriesName: seriesName) }
     }
 
     func searchAllVolumes(seriesName: String) async throws -> [OpenBDParsedBook] {
@@ -152,10 +145,7 @@ final class GoogleBooksService: BookSearchService {
         }
 
         #if DEBUG
-        print("[GoogleBooks] GET \(url.absoluteString)")
-        if let bundleId = urlRequest.value(forHTTPHeaderField: "X-Ios-Bundle-Identifier") {
-            print("[GoogleBooks] X-Ios-Bundle-Identifier: \(bundleId)")
-        }
+        print("[GoogleBooks] GET \(SecureLog.redactedURL(url))")
         #endif
 
         do {

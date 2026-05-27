@@ -51,6 +51,7 @@ final class MangaListViewModel: ObservableObject {
         isCheckingNewReleases = true
         defer { isCheckingNewReleases = false }
         for manga in targets {
+            if Task.isCancelled { break } // タブ離脱等でキャンセルされたら中断
             let didCheck = await newReleaseChecker.check(manga: manga)
             if didCheck { reload() }
         }

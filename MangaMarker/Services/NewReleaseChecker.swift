@@ -3,12 +3,13 @@ import Foundation
 /// 登録済みシリーズの新刊を検出する。
 ///
 /// 戦略:
-/// 1) Google Books API でシリーズ名検索 → 同一シリーズと判定できた書籍を比較。
-/// 2) Google Books が一件もヒットしない場合のフォールバックとして、
-///    OpenBD で「最新巻 ISBN の近傍」を試行。
-/// いずれの経路でも、最終的に「未登録 ISBN かつ 最新登録巻より新しい発売日」のみを採用し、
+/// 1) 書誌検索 (楽天Kobo → Google Books の Composite) でシリーズ名検索 → 同一シリーズと判定できた書籍を比較。
+/// 2) Composite が一件もヒットしない場合のフォールバックとして、OpenBD で「最新巻 ISBN の近傍」を試行。
+/// いずれの経路でも、最終的に「未登録 かつ 最新登録巻より新しい発売日」のみを採用し、
 /// `notifications_log` で冪等性を担保する。
-final class NewReleaseChecker {
+final class NewReleaseChecker: @unchecked Sendable {
+    /// ISBN 近傍探索の試行件数。
+    private let neighborISBNDepth = 8
     private let repository: MangaRepository
     private let openBDService: OpenBDService
     private let bookSearchService: BookSearchService
@@ -58,7 +59,9 @@ final class NewReleaseChecker {
                 return true
             }
         } catch {
-            print("Series search failed for \(manga.title): \(error)")
+            #if DEBUG
+            print("[NewReleaseChecker] series search failed: \(error.localizedDescription)")
+            #endif
         }
 
         // Strategy 2: OpenBD ISBN 近傍
@@ -89,7 +92,7 @@ final class NewReleaseChecker {
         let knownVolumeNumbers = Set(volumes.map(\.volumeNumber))
 
         for book in books {
-            guard isSameSeries(book: book, manga: manga) else { continue }
+            guard SeriesVolumeFilter.isSameSeries(book, seriesName: manga.title) else { continue }
 
             // ISBN が無いソース (楽天Kobo 等) では book.id を冪等キーに使う。
             let dedupKey = book.isbn ?? book.id
@@ -128,26 +131,19 @@ final class NewReleaseChecker {
 
     private func fallbackByISBNNeighborhood(manga: Manga, volumes: [Volume]) async {
         guard let latest = volumes.last, let isbn = latest.isbn else { return }
-        let candidates = neighborISBNs(of: isbn, depth: 8).filter { $0 != isbn }
+        let candidates = neighborISBNs(of: isbn, depth: neighborISBNDepth).filter { $0 != isbn }
         guard !candidates.isEmpty else { return }
         do {
             let books = try await openBDService.fetch(isbns: candidates)
             await process(candidates: books, manga: manga, volumes: volumes)
         } catch {
-            print("OpenBD neighborhood check failed for \(manga.title): \(error)")
+            #if DEBUG
+            print("[NewReleaseChecker] OpenBD neighborhood check failed: \(error.localizedDescription)")
+            #endif
         }
     }
 
     // MARK: - Helpers
-
-    private func isSameSeries(book: OpenBDParsedBook, manga: Manga) -> Bool {
-        let target = BookMetadataParser.normalizeTitle(manga.title)
-        let candidates = [book.series, book.title].compactMap { $0 }
-        return candidates.contains { candidate in
-            let normalized = BookMetadataParser.normalizeTitle(candidate)
-            return normalized.contains(target) || target.contains(normalized)
-        }
-    }
 
     private func neighborISBNs(of isbn: String, depth: Int) -> [String] {
         let digits = isbn.filter(\.isNumber)

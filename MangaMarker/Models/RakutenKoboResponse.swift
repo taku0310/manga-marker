@@ -48,19 +48,16 @@ struct RakutenKoboItem: Decodable {
         }()
         let series = (seriesName?.isEmpty == false) ? seriesName : nil
         let publisher = (publisherName?.isEmpty == false) ? publisherName : nil
-        // Kobo 電子書籍は ISBN を持たないことが多いので、無ければ itemNumber を識別子に使う。
-        let identifier: String? = {
-            if let isbn, !isbn.isEmpty { return isbn }
-            if let itemNumber, !itemNumber.isEmpty { return itemNumber }
-            return nil
-        }()
+        // ISBN 列には本物の ISBN のみ格納する (Kobo 電子書籍は ISBN を持たないことが多く nil になる)。
+        // ISBN が無い場合の安定キーは OpenBDParsedBook.id (タイトル+著者+巻数) が担う。
+        let realISBN = (isbn?.isEmpty == false) ? isbn : nil
         let rawCover = (largeImageUrl?.isEmpty == false) ? largeImageUrl : imageUrl
         let cover = rawCover?.replacingOccurrences(of: "http://", with: "https://")
         let volumeNumber = BookMetadataParser.extractVolumeNumber(from: fullTitle)
             ?? BookMetadataParser.extractVolumeNumber(from: seriesName)
 
         return OpenBDParsedBook(
-            isbn: identifier,
+            isbn: realISBN,
             title: fullTitle,
             series: series,
             volumeNumber: volumeNumber,

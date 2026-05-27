@@ -1,10 +1,15 @@
 import SwiftUI
 
 struct MangaDetailView: View {
-    @StateObject var viewModel: MangaDetailViewModel
+    @StateObject private var viewModel: MangaDetailViewModel
     @State private var showingAddByISBN = false
     @State private var inputISBN = ""
     @State private var showingResetConfirm = false
+
+    @MainActor
+    init(deps: AppDependencies, manga: Manga) {
+        _viewModel = StateObject(wrappedValue: deps.makeMangaDetailViewModel(for: manga))
+    }
 
     var body: some View {
         List {
@@ -83,8 +88,11 @@ struct MangaDetailView: View {
         } message: {
             Text("すべての巻が未読に戻り、「次に読む」が1巻に戻ります。")
         }
-        .alert("エラー", isPresented: .constant(viewModel.errorMessage != nil)) {
-            Button("OK") { viewModel.errorMessage = nil }
+        .alert("エラー", isPresented: Binding(
+            get: { viewModel.errorMessage != nil },
+            set: { if !$0 { viewModel.errorMessage = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
         } message: {
             Text(viewModel.errorMessage ?? "")
         }

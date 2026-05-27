@@ -6,25 +6,14 @@ struct RootTabView: View {
     var body: some View {
         TabView {
             NavigationStack {
-                MangaListView(
-                    viewModel: MangaListViewModel(
-                        repository: deps.repository,
-                        newReleaseChecker: deps.newReleaseChecker
-                    )
-                )
+                MangaListView(deps: deps)
             }
             .tabItem {
                 Label("ライブラリ", systemImage: "books.vertical")
             }
 
             NavigationStack {
-                SearchView(
-                    viewModel: SearchViewModel(
-                        openBDService: deps.openBDService,
-                        bookSearchService: deps.bookSearchService,
-                        repository: deps.repository
-                    )
-                )
+                SearchView(deps: deps)
             }
             .tabItem {
                 Label("検索", systemImage: "magnifyingglass")

@@ -1,9 +1,11 @@
 import Foundation
 import SQLite3
+import os
 
 let SQLITE_TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
-final class DatabaseManager {
+final class DatabaseManager: @unchecked Sendable {
+    private static let log = Logger(subsystem: "com.example.MangaMarker", category: "Database")
     static let shared = DatabaseManager()
 
     private(set) var db: OpaquePointer?
@@ -29,7 +31,10 @@ final class DatabaseManager {
 
     private func open() {
         if sqlite3_open(dbPath, &db) != SQLITE_OK {
-            assertionFailure("DB open failed: \(String(cString: sqlite3_errmsg(db)))")
+            let message = db.map { String(cString: sqlite3_errmsg($0)) } ?? "unknown error"
+            // Release でも記録する (assertionFailure は Release で no-op のため)。
+            Self.log.error("DB open failed: \(message, privacy: .public)")
+            assertionFailure("DB open failed: \(message)")
         }
         exec("PRAGMA foreign_keys = ON;")
         exec("PRAGMA journal_mode = WAL;")
@@ -44,7 +49,7 @@ final class DatabaseManager {
         var err: UnsafeMutablePointer<CChar>?
         let rc = sqlite3_exec(db, sql, nil, nil, &err)
         if rc != SQLITE_OK, let err {
-            print("SQL error: \(String(cString: err))")
+            Self.log.error("SQL error: \(String(cString: err), privacy: .public)")
             sqlite3_free(err)
             return false
         }

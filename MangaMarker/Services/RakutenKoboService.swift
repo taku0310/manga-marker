@@ -48,7 +48,7 @@ private struct RakutenKoboAPIErrorBody: Decodable {
 /// 旧ホスト app.rakuten.co.jp は UUID 形式の applicationId を受け付けないため、
 /// 新ホスト openapi.rakuten.co.jp を使用する。
 /// https://webservice.rakuten.co.jp/documentation/kobo-ebook-search
-final class RakutenKoboService: BookSearchService {
+final class RakutenKoboService: BookSearchService, @unchecked Sendable {
     private let session: URLSession
     private let baseURL = URL(string: "https://openapi.rakuten.co.jp/services/api/Kobo/EbookSearch/20170426")!
     private let appId: String?
@@ -91,14 +91,7 @@ final class RakutenKoboService: BookSearchService {
 
     func searchSeries(_ seriesName: String, maxResults: Int = 30) async throws -> [OpenBDParsedBook] {
         let books = try await searchByTitle(seriesName, maxResults: maxResults)
-        let target = BookMetadataParser.normalizeTitle(seriesName)
-        return books.filter { book in
-            let candidates = [book.series, book.title].compactMap { $0 }
-            return candidates.contains { candidate in
-                let normalized = BookMetadataParser.normalizeTitle(candidate)
-                return normalized.contains(target) || target.contains(normalized)
-            }
-        }
+        return books.filter { SeriesVolumeFilter.isSameSeries($0, seriesName: seriesName) }
     }
 
     func searchAllVolumes(seriesName: String) async throws -> [OpenBDParsedBook] {
@@ -181,7 +174,7 @@ final class RakutenKoboService: BookSearchService {
         guard let url = components.url else { throw RakutenKoboError.invalidURL }
 
         #if DEBUG
-        print("[RakutenKobo] GET \(url.absoluteString)")
+        print("[RakutenKobo] GET \(SecureLog.redactedURL(url))")
         #endif
 
         do {

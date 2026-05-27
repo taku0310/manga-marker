@@ -254,7 +254,7 @@ let candidates = try await bookSearch.searchSeries("ワンピース")
 - **App Intents / Siri Shortcuts** : 「次に読む巻を教えて」発話で読み上げ。
 - **共有ライブラリ** : 漫画喫茶店内の友人と読書状況を共有 (CloudKit Sharing)。
 - **ダーク/ライト最適化** + アクセシビリティ (Dynamic Type、VoiceOver ラベル整備)。
-- **テスト** : `MangaRepositoryTests` を出発点に、`OpenBDService` をプロトコル化して URLProtocol スタブで網羅。
+- **テスト** : `GoogleBooksServiceTests` で URLProtocol スタブによる通信経路テストを実施済。`OpenBDService` / `RakutenKoboService` の経路や ViewModel のプロトコル化モックテストへ拡張余地あり。
 - **CI** : GitHub Actions で `xcodebuild test` を回す。
 
 ---
@@ -279,6 +279,27 @@ open MangaMarker.xcodeproj
 5. Deployment Target を **iOS 17.0** 以上に。
 6. シミュレータ / 実機いずれでもビルド・動作可能 (カメラ等のハード依存機能は無し)。
 
+### プライバシー / バックグラウンド / 審査
+
+- **Privacy Manifest**: `MangaMarker/App/PrivacyInfo.xcprivacy` を同梱済 (UserDefaults を Required Reason API `CA92.1` として宣言、トラッキング無し・収集データ無し)。App Store 提出に必要。
+- **バックグラウンド新刊チェック**: アプリ非表示時にも `BGAppRefreshTask` で新刊チェックを試みます。動作には Xcode の **Signing & Capabilities → Background Modes → Background fetch** を有効化してください (`Info.plist` の `BGTaskSchedulerPermittedIdentifiers` / `UIBackgroundModes` は設定済)。未設定でもクラッシュはせず、フォアグラウンドのチェックのみで動作します。
+- **ATS**: 全通信 HTTPS のため例外ドメイン設定は不要 (削除済、既定の App Transport Security が適用)。
+
+### API キーの設定方法 (共通)
+
+**シークレットはリポジトリ/ソースに直書きしません。** `Info.plist` はビルド設定参照 (`$(GOOGLE_BOOKS_API_KEY)` 等) になっており、値は以下のいずれかで注入します。
+
+- **推奨**: テンプレートをコピーしてローカル専用ファイルに記入 (git 管理外)。
+  ```bash
+  cp Secrets.example.xcconfig Secrets.xcconfig
+  # Secrets.xcconfig に GOOGLE_BOOKS_API_KEY 等を記入
+  ```
+  作成後、`project.yml` に `configFiles` を追加して再生成するか、Xcode の Target → Build Settings で同名のユーザー定義設定として上書きします。
+- 未設定でもアプリはビルド・起動します (Google は匿名、楽天はスキップ)。
+
+> ⚠️ クライアント同梱の値はビルド成果物 (IPA) に埋め込まれ、抽出を完全には防げません。本番運用ではバックエンドプロキシ経由が推奨です。特に楽天 `accessKey` は Bundle 制限が効かないため注意。
+> DEBUG ログでは API キー等のクエリは `***` にマスクされます (`SecureLog`)。
+
 ### Google Books API のセットアップ (実質必須)
 
 タイトル検索と新刊検出は Google Books API を利用します。コード上は `GoogleBooksApiKey` 未設定でも動きますが、**Google は匿名アクセスを IP 単位で強くスロットルしており、シミュレータからは数回〜数十回で `HTTP 429 rateLimitExceeded` が返ります**。実用するには無料の API キー (個人プロジェクトのクォータ 100,000 req/日) を取得してください。
@@ -287,7 +308,7 @@ open MangaMarker.xcodeproj
 2. 「APIとサービス」→「ライブラリ」→ **「Books API」を検索 → 有効化**
 3. 「APIとサービス」→「認証情報」→ 「認証情報を作成」→ **「API キー」**
 4. **(推奨) 「キーを制限」→ アプリケーションの制限 → 「iOS アプリ」** を選び、**`MangaMarker/App/Info.plist` 内の Bundle ID と完全一致する値** (デフォルトは `com.example.MangaMarker`) を追加。
-5. Xcode で `MangaMarker/App/Info.plist` を開き、`GoogleBooksApiKey` の値を発行された API キー (`AIzaSy...`) に置換
+5. 発行された API キー (`AIzaSy...`) を **`Secrets.xcconfig` の `GOOGLE_BOOKS_API_KEY`** に設定 (上記「API キーの設定方法」参照)
 6. Product → Clean Build Folder → Build & Run
 
 > 本アプリは API リクエストに `X-Ios-Bundle-Identifier` ヘッダを自動付与するので、iOS アプリ制限つき API キーがそのまま使えます。
@@ -303,9 +324,9 @@ open MangaMarker.xcodeproj
 2. アプリ詳細から以下の **2 つ** をコピー
    - **アプリケーションID** (UUID 形式、例 `8738d9c9-...`)
    - **アクセスキー** (`pk_` プレフィックス、目玉アイコンで表示)
-3. Xcode で `MangaMarker/App/Info.plist` を開き
-   - `RakutenAppId` ← アプリケーションID
-   - `RakutenAccessKey` ← アクセスキー
+3. `Secrets.xcconfig` に設定 (上記「API キーの設定方法」参照)
+   - `RAKUTEN_APP_ID` ← アプリケーションID
+   - `RAKUTEN_ACCESS_KEY` ← アクセスキー
 4. Product → Clean Build Folder → Build & Run
 
 > 現行の楽天 OpenAPI は **新ホスト `openapi.rakuten.co.jp` + `applicationId` + `accessKey`** の組み合わせで認証します。旧ホスト `app.rakuten.co.jp` は UUID 形式を受け付けず `HTTP 400 specify valid applicationId` を返すため使用しません。

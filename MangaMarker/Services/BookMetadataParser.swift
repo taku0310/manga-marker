@@ -86,6 +86,20 @@ enum BookMetadataParser {
         return nil
     }
 
+    /// 単行本ではない (= 全巻管理の対象外) と思われるタイトルか判定する。
+    /// 単話/分冊/小説/ノベライズ、および「第N話」(話売り) を除外する。
+    /// 例: "チ。―地球の運動について―【単話】9" / "小説 水は海に向かって流れる" → true
+    static func isNonTankobon(title: String) -> Bool {
+        let s = normalizeWidth(title)
+        let markers = ["単話", "分冊", "小説", "ノベライズ"]
+        if markers.contains(where: { s.contains($0) }) { return true }
+        if let regex = try? NSRegularExpression(pattern: "第?\\d+\\s*話"),
+           regex.firstMatch(in: s, range: NSRange(s.startIndex..., in: s)) != nil {
+            return true
+        }
+        return false
+    }
+
     /// OpenBD の `pubdate` 形式 (yyyyMMdd 等) を Date に変換。
     static func parseOpenBDDate(_ raw: String?) -> Date? {
         guard let raw, !raw.isEmpty else { return nil }

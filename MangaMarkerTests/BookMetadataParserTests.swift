@@ -39,6 +39,17 @@ final class BookMetadataParserTests: XCTestCase {
         XCTAssertNil(BookMetadataParser.volumeOrdinal(from: "鬼滅の刃 3"))
     }
 
+    func test_isNonTankobon() {
+        // 単話・分冊・小説・ノベライズ・第N話 は単行本以外として除外対象
+        XCTAssertTrue(BookMetadataParser.isNonTankobon(title: "チ。―地球の運動について―【単話】9"))
+        XCTAssertTrue(BookMetadataParser.isNonTankobon(title: "作品名【分冊版】3"))
+        XCTAssertTrue(BookMetadataParser.isNonTankobon(title: "小説 水は海に向かって流れる"))
+        XCTAssertTrue(BookMetadataParser.isNonTankobon(title: "作品名 第12話"))
+        // 通常の単行本は対象外
+        XCTAssertFalse(BookMetadataParser.isNonTankobon(title: "鬼滅の刃 3"))
+        XCTAssertFalse(BookMetadataParser.isNonTankobon(title: "ドラゴン桜（5）"))
+    }
+
     func test_normalizeWidth_keepsJapanese() {
         // カタカナ・漢字・ひらがなは変換しない、ASCII 全角のみ半角化
         XCTAssertEqual(BookMetadataParser.normalizeWidth("あくたの死に際（４）"), "あくたの死に際(4)")
@@ -252,6 +263,30 @@ final class SeriesVolumeFilterTests: XCTestCase {
     private func book(_ title: String, series: String?, volume: Int?, isbn: String? = nil) -> OpenBDParsedBook {
         OpenBDParsedBook(isbn: isbn, title: title, series: series, volumeNumber: volume,
                          author: "", publisher: nil, coverImageURL: nil, publishedAt: nil)
+    }
+
+    func test_isSameSeries_exactMatchExcludesSequelsAndSpinoffs() {
+        let dragon = book("ドラゴン桜 5", series: "ドラゴン桜", volume: 5)
+        let dragon2 = book("ドラゴン桜2 5", series: "ドラゴン桜2", volume: 5)
+        // 続編は完全一致で別シリーズ扱い (双方向に混ざらない)
+        XCTAssertTrue(SeriesVolumeFilter.isSameSeries(dragon, seriesName: "ドラゴン桜"))
+        XCTAssertFalse(SeriesVolumeFilter.isSameSeries(dragon2, seriesName: "ドラゴン桜"))
+        XCTAssertFalse(SeriesVolumeFilter.isSameSeries(dragon, seriesName: "ドラゴン桜2"))
+        // スピンオフ
+        let spinoff = book("新ナニワ金融道 20", series: "新ナニワ金融道", volume: 20)
+        XCTAssertFalse(SeriesVolumeFilter.isSameSeries(spinoff, seriesName: "ナニワ金融道"))
+    }
+
+    func test_allVolumes_excludesSequelAndNonTankobon() {
+        let input = [
+            book("ドラゴン桜 1", series: "ドラゴン桜", volume: 1),
+            book("ドラゴン桜 2", series: "ドラゴン桜", volume: 2),
+            book("ドラゴン桜2 1", series: "ドラゴン桜2", volume: 1),     // 続編 → 除外
+            book("ドラゴン桜【単話】3", series: "ドラゴン桜", volume: 3)   // 単話 → 除外
+        ]
+        let volumes = SeriesVolumeFilter.allVolumes(from: input, seriesName: "ドラゴン桜")
+        XCTAssertEqual(volumes.map(\.volumeNumber), [1, 2])
+        XCTAssertTrue(volumes.allSatisfy { $0.series == "ドラゴン桜" })
     }
 
     func test_representatives_oneRepresentativePerSeries_lowestVolume() {
